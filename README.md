@@ -399,24 +399,23 @@ tu-proyecto/
 ```
 
 ### Nota sobre ScriptsData
-Lo previo en `ScriptsData/` (descarga y clasificación) se mantiene como etapa de adquisición. El pipeline nuevo opera sobre PDFs ya disponibles en `data/pdfs/` (puedes organizar por fuente como `data/pdfs/OAPEN_PDFs/`, `data/pdfs/USENIX/`, `data/pdfs/NIST/`), genera `interim/*.pages.jsonl`, produce chunks en `data/chunks/*.chunks.jsonl` y consolida en `data/chunks/all_chunks.jsonl`, listo para indexar en Weaviate.
+Lo previo en `ScriptsData/` (descarga y clasificación) se mantiene como etapa de adquisición. El pipeline nuevo opera sobre PDFs ya disponibles en `data/raw/` (puedes organizar por fuente como `data/raw/OAPEN_PDFs/`, `data/raw/USENIX/`, `data/raw/NIST/`), genera `interim/*.pages.jsonl`, produce chunks en `data/chunks/*.chunks.jsonl` y consolida en `data/chunks/all_chunks.jsonl`, listo para indexar en Weaviate.
 
 ### Cómo correr
 ```bash
 # 1) levantar Weaviate
-bash scripts/up_weaviate.sh
+bash scripts/rag/up_weaviate.sh
 
 # 2) extraer texto por página (limpio)
-# puedes apuntar a cualquier subcarpeta de data/pdfs/
-bash scripts/10_extract.sh data/pdfs
+# puedes apuntar a cualquier subcarpeta de data/raw/
+bash scripts/rag/10_extract.sh data/raw
 
 # 3) generar chunks jerárquicos + semánticos
-bash scripts/20_chunk.sh
+bash scripts/rag/20_chunk.sh
 
 # 4) indexar en Weaviate
-bash scripts/30_index.sh
+bash scripts/rag/30_index.sh
 ```
-
 
 ## Nueva estructura unificada (RAG + FT)
 
@@ -427,58 +426,70 @@ DatosTesis/
 ├── .env.example
 ├── docker-compose.yml
 ├── requeriments.txt
-├── Makefile
+├── Makefile                      # (opcional) targets: rag-extract, rag-chunk, rag-index, ft-prepare, ft-train
 │
 ├── configs/
 │   ├── rag.yaml
 │   ├── weaviate.schema.json
-│   └── ft.yaml
+│   └── ft.yaml                   # NUEVO (hp de FT: modelo base, LoRA, lr, etc.)
 │
-├── data/
-│   ├── raw/
+├── data/                         # *Data lake compartido*
+│   ├── raw/                      # PDFs originales (lo que hoy tienes en data/pdfs/*)
 │   │   ├── USENIX/
 │   │   ├── NIST/
-│   │   └── OAPEN_PDFs/
-│   ├── interim/
-│   ├── clean/
-│   ├── chunks/
-│   ├── export/
-│   ├── models/
-│   ├── ft_raw/
-│   └── ft_datasets/
+│   │   └── OAPEN_PDFs/...
+│   ├── interim/                  # páginas limpias por libro (*.pages.jsonl)
+│   ├── clean/                    # (si guardas normalizaciones per-page)
+│   ├── chunks/                   # *.chunks.jsonl y all_chunks.jsonl (para RAG)
+│   ├── export/                   # exports varios (ej. CSV/Parquet)
+│   ├── models/                   # (opcional) caché de modelos locales HF
+│   ├── ft_raw/                   # NUEVO: materiales base para FT (no-chunks)
+│   └── ft_datasets/              # NUEVO: datasets finales FT (train/val/test JSONL)
 │
 ├── src/
-│   ├── common/
-│   │   ├── io.py
-│   │   ├── textutils.py
-│   │   ├── licenses.py
+│   ├── common/                   # NUEVO: utilidades compartidas por RAG y FT
+│   │   ├── io.py                 # leer/escribir jsonl, paths, hashing source_id
+│   │   ├── textutils.py          # normalización, sent-split
+│   │   ├── licenses.py           # (opcional) control de licencias/flags
 │   │   └── evalutils.py
-│   ├── rag/
+│   │
+│   ├── rag/                      # (mueve aquí tu código RAG)
 │   │   ├── ingest/
+│   │   │   └── extract_pdf.py    # (lo que tienes) PyMuPDF + OCR + limpieza
 │   │   ├── process/
+│   │   │   ├── chunking.py       # (tu actual) jerárquico + semántico
+│   │   │   └── quality.py
 │   │   ├── index/
+│   │   │   ├── embeddings.py     # sentence-transformers (local)
+│   │   │   ├── ingest_to_weaviate.py
+│   │   │   └── weaviate_client.py
 │   │   ├── api/
+│   │   │   ├── retriever.py
+│   │   │   └── server.py
 │   │   └── eval/
-│   └── ft/
-│       ├── prepare_dataset.py
-│       ├── train_lora.py
-│       ├── infer.py
-│       └── eval_ft.py
+│   │       ├── build_eval_set.py
+│   │       └── evaluate_rag.py
+│   │
+│   └── ft/                       # NUEVO: fine-tuning separado
+│       ├── prepare_dataset.py    # crea ejemplos (prompt→respuesta, extracción, etc.)
+│       ├── train_lora.py         # HF Transformers + PEFT/QLoRA (sin OpenAI)
+│       ├── infer.py              # inferencia del checkpoint
+│       └── eval_ft.py            # métricas EM/F1/ROUGE según tarea
 │
 ├── scripts/
-│   ├── rag/
+│   ├── rag/                      # (mueve aquí los tuyos)
 │   │   ├── up_weaviate.sh
 │   │   ├── 10_extract.sh
 │   │   ├── 20_chunk.sh
 │   │   ├── 30_index.sh
 │   │   └── 40_query_examples.sh
 │   └── ft/
-│       ├── 10_prepare.sh
-│       ├── 20_train.sh
+│       ├── 10_prepare.sh         # genera ft_datasets/{train,val}.jsonl
+│       ├── 20_train.sh           # lanza FT (LoRA/QLoRA)
 │       └── 30_eval.sh
 │
 └── tests/
     ├── test_chunking.py
     ├── test_weaviate.py
-    └── test_ft_dataset.py
+    └── test_ft_dataset.py        # NUEVO: valida formato FT (mensajes, campos, tamaños)
 ```
