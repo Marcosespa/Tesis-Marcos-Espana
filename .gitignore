@@ -1,9 +1,31 @@
 # === Project-specific ===
-# No subir los libros (PDFs)
-OAPEN_PDFs/
+# No subir archivos de datos pesados
+data/raw/
+data/clean/
+data/chunks/
+data/export/
+data/ft_raw/
+data/ft_datasets/
+data/models/
 
-# Excluir archivo JSON grande
+# Archivos específicos pesados
 ScriptsData/cybersecurity_books_filtered.json
+*.xlsx
+*.xls
+*.csv
+*.jsons
+*.jsonl
+
+# PDFs (todos los PDFs son pesados)
+*.pdf
+
+# Archivos de datos grandes
+*.parquet
+*.feather
+*.h5
+*.hdf5
+*.pkl
+*.pickle
 
 # === Python ===
 __pycache__/
@@ -33,6 +55,19 @@ venv/
 *.swo
 *.bak
 
+# Archivos de logs grandes
+logs/
+*.log.*
+*.out
+*.err
+
+# Archivos de configuración pesados
+*.config
+*.conf
+*.ini
+*.yaml
+*.yml
+
 # === Python tooling caches ===
 .mypy_cache/
 .pytype/
@@ -48,14 +83,31 @@ node_modules/
 *.tar
 *.tar.gz
 *.tgz
+*.7z
+*.rar
+
+# === Machine Learning & AI ===
+# Modelos entrenados
+*.model
+*.pth
+*.pt
+*.ckpt
+*.safetensors
+*.bin
+*.safetensors
+
+# Datasets grandes
+datasets/
+*.dataset
+*.train
+*.test
+*.val
+
+# Checkpoints de entrenamiento
+checkpoints/
+runs/
+wandb/
+tensorboard/
 
 # === Data artifacts (pipeline outputs) ===
-data/raw/
-data/clean/
-data/chunks/
-data/export/
-
-# Local venv from pipeline usage
-.venv/
-data/ft_raw/
-data/ft_datasets/
+# Ya incluido arriba en la sección de archivos pesados
