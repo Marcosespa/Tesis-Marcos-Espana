@@ -364,7 +364,10 @@ tu-proyecto/
 │   ├── rag.yaml                  # chunking/retrieval/rerank
 │   └── weaviate.schema.json      # clase BookChunk
 ├── data/
-│   ├── pdfs/                     # PDFs fuente
+│   ├── pdfs/                     # PDFs fuente (múltiples orígenes)
+│   │   ├── OAPEN_PDFs/           # PDFs de OAPEN
+│   │   ├── USENIX/               # PDFs de USENIX (pendiente)
+│   │   └── NIST/                 # PDFs de NIST (pendiente)
 │   ├── interim/                  # texto por página, limpio (jsonl)
 │   ├── chunks/                   # *.pages.jsonl, *.chunks.jsonl, all_chunks.jsonl
 │   └── models/                   # (opcional) cache de modelos HF
@@ -396,7 +399,7 @@ tu-proyecto/
 ```
 
 ### Nota sobre ScriptsData
-Lo previo en `ScriptsData/` (descarga y clasificación) se mantiene como etapa de adquisición. El pipeline nuevo opera sobre PDFs ya disponibles en `data/pdfs/` (o `OAPEN_PDFs/...`), genera `interim/*.pages.jsonl`, produce chunks en `data/chunks/*.chunks.jsonl` y consolida en `data/chunks/all_chunks.jsonl`, listo para indexar en Weaviate.
+Lo previo en `ScriptsData/` (descarga y clasificación) se mantiene como etapa de adquisición. El pipeline nuevo opera sobre PDFs ya disponibles en `data/pdfs/` (puedes organizar por fuente como `data/pdfs/OAPEN_PDFs/`, `data/pdfs/USENIX/`, `data/pdfs/NIST/`), genera `interim/*.pages.jsonl`, produce chunks en `data/chunks/*.chunks.jsonl` y consolida en `data/chunks/all_chunks.jsonl`, listo para indexar en Weaviate.
 
 ### Cómo correr
 ```bash
@@ -404,7 +407,8 @@ Lo previo en `ScriptsData/` (descarga y clasificación) se mantiene como etapa d
 bash scripts/up_weaviate.sh
 
 # 2) extraer texto por página (limpio)
-bash scripts/10_extract.sh OAPEN_PDFs/ciberseguridad
+# puedes apuntar a cualquier subcarpeta de data/pdfs/
+bash scripts/10_extract.sh data/pdfs
 
 # 3) generar chunks jerárquicos + semánticos
 bash scripts/20_chunk.sh
