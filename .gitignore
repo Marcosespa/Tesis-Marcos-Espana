@@ -48,3 +48,12 @@ node_modules/
 *.tar
 *.tar.gz
 *.tgz
+
+# === Data artifacts (pipeline outputs) ===
+data/raw/
+data/clean/
+data/chunks/
+data/export/
+
+# Local venv from pipeline usage
+.venv/
