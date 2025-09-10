@@ -1,0 +1,48 @@
+# === Project-specific ===
+# No subir los libros (PDFs)
+OAPEN_PDFs/
+
+# === Python ===
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+venv/
+.env/
+.env*/
+.venv/
+
+# === macOS ===
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# === Editors/IDEs ===
+.vscode/
+.idea/
+*.code-workspace
+
+# === Logs & misc ===
+*.log
+*.tmp
+*.swp
+*.swo
+*.bak
+
+# === Python tooling caches ===
+.mypy_cache/
+.pytype/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# === Node (if present in future) ===
+node_modules/
+
+
+# === Archives ===
+*.zip
+*.tar
+*.tar.gz
+*.tgz
