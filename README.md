@@ -416,3 +416,69 @@ bash scripts/20_chunk.sh
 # 4) indexar en Weaviate
 bash scripts/30_index.sh
 ```
+
+
+## Nueva estructura unificada (RAG + FT)
+
+```
+DatosTesis/
+├── README.md
+├── .gitignore
+├── .env.example
+├── docker-compose.yml
+├── requeriments.txt
+├── Makefile
+│
+├── configs/
+│   ├── rag.yaml
+│   ├── weaviate.schema.json
+│   └── ft.yaml
+│
+├── data/
+│   ├── raw/
+│   │   ├── USENIX/
+│   │   ├── NIST/
+│   │   └── OAPEN_PDFs/
+│   ├── interim/
+│   ├── clean/
+│   ├── chunks/
+│   ├── export/
+│   ├── models/
+│   ├── ft_raw/
+│   └── ft_datasets/
+│
+├── src/
+│   ├── common/
+│   │   ├── io.py
+│   │   ├── textutils.py
+│   │   ├── licenses.py
+│   │   └── evalutils.py
+│   ├── rag/
+│   │   ├── ingest/
+│   │   ├── process/
+│   │   ├── index/
+│   │   ├── api/
+│   │   └── eval/
+│   └── ft/
+│       ├── prepare_dataset.py
+│       ├── train_lora.py
+│       ├── infer.py
+│       └── eval_ft.py
+│
+├── scripts/
+│   ├── rag/
+│   │   ├── up_weaviate.sh
+│   │   ├── 10_extract.sh
+│   │   ├── 20_chunk.sh
+│   │   ├── 30_index.sh
+│   │   └── 40_query_examples.sh
+│   └── ft/
+│       ├── 10_prepare.sh
+│       ├── 20_train.sh
+│       └── 30_eval.sh
+│
+└── tests/
+    ├── test_chunking.py
+    ├── test_weaviate.py
+    └── test_ft_dataset.py
+```

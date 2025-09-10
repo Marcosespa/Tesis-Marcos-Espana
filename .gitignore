@@ -57,3 +57,5 @@ data/export/
 
 # Local venv from pipeline usage
 .venv/
+data/ft_raw/
+data/ft_datasets/

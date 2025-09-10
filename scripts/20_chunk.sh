@@ -5,7 +5,7 @@ OUT_DIR="data/chunks"
 mkdir -p "$OUT_DIR"
 python - <<PY
 import json, pathlib, glob
-from src.process.chunking import build_chunks
+from src.rag.process.chunking import build_chunks
 
 paths = sorted(glob.glob("data/interim/*.pages.jsonl"))
 all_out = pathlib.Path("data/chunks/all_chunks.jsonl")
