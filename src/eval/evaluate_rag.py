@@ -1,0 +1,1 @@
+"""Evaluate RAG stub."""

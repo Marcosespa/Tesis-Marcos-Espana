@@ -1,0 +1,9 @@
+chunking:
+  max_tokens: 400
+  overlap_ratio: 0.15
+  heading_regex: "^(?:[A-Z][A-Z0-9 ,.:-]{3,}|(?:\d+\.)+\s+.+)"
+retrieval:
+  hybrid: true
+  alpha: 0.5
+rerank:
+  enabled: false

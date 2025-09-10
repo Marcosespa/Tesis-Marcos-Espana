@@ -1,0 +1,12 @@
+{
+  "class": "BookChunk",
+  "vectorizer": "none",
+  "properties": [
+    {"name": "docId", "dataType": ["text"], "indexFilterable": true},
+    {"name": "level", "dataType": ["int"]},
+    {"name": "title", "dataType": ["text"]},
+    {"name": "text", "dataType": ["text"]},
+    {"name": "pageStart", "dataType": ["int"]},
+    {"name": "pageEnd", "dataType": ["int"]}
+  ]
+}

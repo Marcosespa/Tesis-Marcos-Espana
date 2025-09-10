@@ -349,3 +349,66 @@ params = {
 **Desarrollado para investigación académica en ciberseguridad**  
 **Fuente de datos**: OAPEN (Open Access Publishing in European Networks)  
 **Última actualización**: Septiembre 2024
+
+
+## Estructura del proyecto (RAG)
+
+```
+tu-proyecto/
+├── README.md
+├── .gitignore
+├── pyproject.toml                # o requirements.txt
+├── docker-compose.yml            # Weaviate
+├── .env.example                  # sin claves
+├── configs/
+│   ├── rag.yaml                  # chunking/retrieval/rerank
+│   └── weaviate.schema.json      # clase BookChunk
+├── data/
+│   ├── pdfs/                     # PDFs fuente
+│   ├── interim/                  # texto por página, limpio (jsonl)
+│   ├── chunks/                   # *.pages.jsonl, *.chunks.jsonl, all_chunks.jsonl
+│   └── models/                   # (opcional) cache de modelos HF
+├── src/
+│   ├── ingest/
+│   │   └── extract_pdf.py        # PyMuPDF + OCR + limpieza
+│   ├── process/
+│   │   ├── chunking.py           # jerárquico + semántico (400 tok + 15%)
+│   │   └── quality.py            # banderas de calidad (ocr, vacío, etc.)
+│   ├── index/
+│   │   ├── embeddings.py         # SentenceTransformers (CPU/GPU)
+│   │   ├── weaviate_client.py    # helpers (crear clase, batch upsert, query)
+│   │   └── ingest_to_weaviate.py # lee all_chunks.jsonl → indexa
+│   ├── api/
+│   │   ├── server.py             # FastAPI: /query (híbrida) + /citations
+│   │   └── retriever.py          # híbrida + (opcional) rerank local
+│   └── eval/
+│       ├── build_eval_set.py
+│       └── evaluate_rag.py
+├── scripts/
+│   ├── up_weaviate.sh
+│   ├── 10_extract.sh
+│   ├── 20_chunk.sh
+│   ├── 30_index.sh
+│   └── 40_query_examples.sh
+└── tests/
+    ├── test_chunking.py
+    └── test_weaviate.py
+```
+
+### Nota sobre ScriptsData
+Lo previo en `ScriptsData/` (descarga y clasificación) se mantiene como etapa de adquisición. El pipeline nuevo opera sobre PDFs ya disponibles en `data/pdfs/` (o `OAPEN_PDFs/...`), genera `interim/*.pages.jsonl`, produce chunks en `data/chunks/*.chunks.jsonl` y consolida en `data/chunks/all_chunks.jsonl`, listo para indexar en Weaviate.
+
+### Cómo correr
+```bash
+# 1) levantar Weaviate
+bash scripts/up_weaviate.sh
+
+# 2) extraer texto por página (limpio)
+bash scripts/10_extract.sh OAPEN_PDFs/ciberseguridad
+
+# 3) generar chunks jerárquicos + semánticos
+bash scripts/20_chunk.sh
+
+# 4) indexar en Weaviate
+bash scripts/30_index.sh
+```
