@@ -1,6 +1,25 @@
 chunking:
-  max_tokens: 400
-  overlap_ratio: 0.15
+  # Límites de tokens
+  target_tokens: 900
+  min_tokens: 400
+  max_tokens: 1400
+  overlap_ratio: 0.18
+  
+  # Parámetros del refinado semántico
+  window_size: 150
+  smoothing_window: 6
+  rupture_threshold: 3.5
+  
+  # Configuración de embeddings
+  embedding_model: "tfidf"  # "tfidf" o "sentence-transformers"
+  
+  # Reglas de calidad
+  preserve_tables: true
+  preserve_code: true
+  preserve_figures: true
+  bonus_title_tokens: 50
+  
+  # Configuración legacy (mantenida para compatibilidad)
   heading_regex: "^(?:[A-Z][A-Z0-9 ,.:-]{3,}|(?:\d+\.)+\s+.+)"
 retrieval:
   hybrid: true
