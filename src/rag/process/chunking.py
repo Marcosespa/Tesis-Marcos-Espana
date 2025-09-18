@@ -803,7 +803,7 @@ def process_multiple_jsonl_files(
                     for key, value in doc.metadata.items():
                         if isinstance(value, (str, int, float, bool, list, dict, type(None))):
                             clean_metadata[key] = value
-                        else:
+        else:
                             clean_metadata[key] = str(value)
                     
                     chunk_data = {
@@ -868,7 +868,7 @@ def split_text_by_tokens(text: str, win_tokens: int, step_tokens: int, model_nam
             word = words[j]
             word_tokens = count_tokens(word, model_name)
             if current_tokens + word_tokens > win_tokens and window_words:
-                break
+                        break
             window_words.append(word)
             current_tokens += word_tokens
             j += 1
