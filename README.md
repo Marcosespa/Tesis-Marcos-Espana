@@ -102,6 +102,42 @@ DatosTesis/
 
 ## 🛠️ Scripts de Procesamiento
 
+### Scripts de Extracción y Limpieza de Datos
+
+#### `src/rag/ingest/extract_pdf.py`
+- **Propósito**: Extracción y limpieza de documentos PDF
+- **Funciones**:
+  - Extrae texto de PDFs con OCR si es necesario
+  - Normaliza texto (guiones, espacios, caracteres de control)
+  - Detecta y elimina headers/footers repetidos
+  - Extrae abstracts y metadatos
+  - Genera archivos `.pages.jsonl` limpios
+- **Entrada**: `data/raw/*/` (PDFs)
+- **Salida**: `data/interim/*/` (archivos .pages.jsonl)
+
+#### `src/rag/ingest/extract_text.py`
+- **Propósito**: Procesamiento y limpieza de archivos de texto (TXT, JSON)
+- **Funciones**:
+  - Detecta codificación automáticamente
+  - Normaliza texto (similar a PDFs)
+  - Detecta headers/footers en archivos de texto
+  - Extrae metadatos y abstracts
+  - Categoriza por fuente (AnnoCTR, MITRE, OWASP, SecurityTools, AISecKG)
+  - Genera archivos `.pages.jsonl` estandarizados
+- **Entrada**: `data/raw/*/` (archivos .txt)
+- **Salida**: `data/interim/*/` (archivos .pages.jsonl)
+
+#### `src/rag/ingest/clean_all_text_data.py`
+- **Propósito**: Script wrapper para procesar todos los datos de texto
+- **Funciones**:
+  - Ejecuta `extract_text.py` en todos los directorios de texto
+  - Configura parámetros específicos por fuente
+  - Genera estadísticas de procesamiento
+  - Maneja errores y reporta resultados
+- **Fuentes procesadas**: AnnoCTR, MITRE, OWASP, SecurityTools, AISecKG
+- **Entrada**: `data/raw/*/` (archivos .txt)
+- **Salida**: `data/interim/*/` (archivos .pages.jsonl consolidados)
+
 ### Scripts de Integración de Datos
 
 #### `process_annoctr_text.py`
@@ -144,34 +180,44 @@ DatosTesis/
 
 ## 🔄 Flujo de Procesamiento
 
-### 1. **Extracción de Datos**
+### 1. **Extracción y Limpieza de Datos**
 ```bash
-# Procesar AnnoCTR
-python scripts/process_annoctr_text.py
+# Procesar todos los archivos de texto (TXT, JSON)
+python src/rag/ingest/clean_all_text_data.py
 
-# Procesar MITRE y OWASP
-python scripts/process_mitre_owasp.py
+# O procesar fuentes específicas:
+python src/rag/ingest/extract_text.py --in data/raw/AnnoCTR --out data/interim/AnnoCTR --min-chars 100
+python src/rag/ingest/extract_text.py --in data/raw/MITRE --out data/interim/MITRE --min-chars 50
+python src/rag/ingest/extract_text.py --in data/raw/OWASP --out data/interim/OWASP --min-chars 50
+python src/rag/ingest/extract_text.py --in data/raw/SecurityTools --out data/interim/SecurityTools --min-chars 100
+python src/rag/ingest/extract_text.py --in data/raw/AISecKG --out data/interim/AISecKG --min-chars 50
+
+# Procesar PDFs (NIST, OAPEN, USENIX)
+python src/rag/ingest/extract_pdf.py --in data/raw --out data/interim --min-chars 50
 ```
 
-### 2. **Integración**
+### 2. **Generación de Chunks**
+```bash
+# Generar chunks para todas las fuentes
+bash scripts/rag/20_chunk.sh
+```
+
+### 3. **Integración de Datos**
 ```bash
 # Integrar AnnoCTR
 python scripts/integrate_annoctr.py
 
 # Integrar MITRE y OWASP
 python scripts/integrate_mitre_owasp.py
+
+# Integrar Security Tools
+python scripts/integrate_security_tools_enhanced.py
 ```
 
-### 3. **Sistema RAG**
+### 4. **Sistema RAG**
 ```bash
 # Levantar Weaviate
 bash scripts/rag/up_weaviate.sh
-
-# Extraer texto de PDFs
-bash scripts/rag/10_extract.sh data/raw
-
-# Generar chunks
-bash scripts/rag/20_chunk.sh
 
 # Indexar en Weaviate
 bash scripts/rag/30_index.sh
@@ -183,6 +229,8 @@ bash scripts/rag/30_index.sh
 - **Total de chunks**: 45,689 chunks
 - **Fuentes integradas**: 8 fuentes de datos
 - **Documentos procesados**: 3,000+ documentos
+- **Archivos .pages.jsonl**: 390 archivos procesados
+- **Tamaño data/interim**: 399MB (datos limpios)
 - **Palabras totales**: 2,000,000+ palabras
 - **Tamaño total de datos**: ~6.5GB
 
@@ -246,6 +294,8 @@ bash scripts/rag/30_index.sh
 - **PyMuPDF**: Extracción de texto de PDFs
 - **BeautifulSoup**: Procesamiento de HTML
 - **Readability**: Extracción de contenido principal
+- **chardet**: Detección automática de codificación
+- **re (regex)**: Normalización y limpieza de texto
 - **SentenceTransformers**: Embeddings semánticos
 
 ### Sistema RAG
@@ -280,6 +330,20 @@ bash scripts/rag/30_index.sh
 - Metadata enriquecida
 - Categorización detallada
 - Documentación técnica completa de herramientas
+
+### 4. **Sistema de Limpieza de Datos**
+- **Normalización de texto**: Unificación de guiones, espacios y caracteres de control
+- **Detección de codificación**: Automática para archivos de texto
+- **Eliminación de headers/footers**: Detección inteligente de contenido repetitivo
+- **Extracción de abstracts**: Identificación automática de resúmenes
+- **Categorización automática**: Clasificación por fuente de datos
+- **Validación de calidad**: Flags de calidad para cada documento procesado
+
+### 5. **Optimización de Estructura**
+- **Eliminación de duplicaciones**: Estructuras de directorios limpias
+- **Consolidación de datos**: Archivos agrupados por categorías funcionales
+- **Organización jerárquica**: Estructura clara y escalable
+- **Eficiencia de procesamiento**: Archivos consolidados más fáciles de manejar
 
 ## 🔧 Instalación y Configuración
 
@@ -372,7 +436,7 @@ Para preguntas o sugerencias, por favor abre un issue en el repositorio.
 ---
 
 **Desarrollado para investigación académica en ciberseguridad**  
-**Última actualización**: Diciembre 2024 (v2.0 - Security Tools Enhanced)
+**Última actualización**: Diciembre 2024 (v2.1 - Text Processing & Structure Optimization)
 
 ## 🎉 Estado Actual del Proyecto
 
@@ -383,6 +447,10 @@ Para preguntas o sugerencias, por favor abre un issue en el repositorio.
 - **Sistema de chunking** jerárquico y semántico
 - **Limpieza y optimización** de datos raw
 - **Consolidación** en archivo único `all_chunks.jsonl`
+- **Sistema de limpieza de texto** para fuentes no-PDF
+- **390 archivos .pages.jsonl** procesados y normalizados
+- **Estructura de directorios** limpia y optimizada
+- **Scripts de procesamiento** unificados y robustos
 
 ### 🔄 En Progreso
 - **Indexación en Weaviate** (próximo paso)
@@ -394,3 +462,5 @@ Para preguntas o sugerencias, por favor abre un issue en el repositorio.
 - **Calidad de datos**: Documentación completa y actualizada
 - **Organización**: 24 categorías funcionales de herramientas
 - **Escalabilidad**: Sistema preparado para nuevas fuentes de datos
+- **Limpieza de datos**: Sistema robusto para normalización de texto
+- **Estructura optimizada**: Eliminación de duplicaciones y organización clara
