@@ -1,495 +1,396 @@
-# Proyecto de Extracción de Datos de Ciberseguridad de OAPEN
+# Sistema RAG de Ciberseguridad - DatosTesis
 
 ## 📋 Descripción del Proyecto
 
-Este proyecto automatiza la extracción, clasificación y descarga de documentos académicos relacionados con ciberseguridad desde la biblioteca digital OAPEN (Open Access Publishing in European Networks). El objetivo es crear una colección organizada de PDFs académicos sobre ciberseguridad para investigación y análisis.
+Este proyecto implementa un sistema RAG (Retrieval-Augmented Generation) comprehensivo para ciberseguridad, integrando múltiples fuentes de datos de alta calidad. El sistema combina estándares oficiales, investigación académica, reportes de amenazas, técnicas de ataque y documentación de herramientas para crear una base de conocimiento especializada.
+
+## 🎯 Objetivos
+
+- **Consolidar fuentes de datos**: Integrar estándares, investigación, reportes y herramientas de ciberseguridad
+- **Sistema RAG especializado**: Crear un sistema de recuperación de información específico para ciberseguridad
+- **Chunking inteligente**: Implementar chunking jerárquico y semántico para optimizar la recuperación
+- **Indexación vectorial**: Usar Weaviate para búsqueda semántica avanzada
+- **Fine-tuning**: Preparar datos para entrenamiento de modelos especializados
 
 ## 🏗️ Estructura del Proyecto
 
 ```
 DatosTesis/
-├── 📁 OAPEN_PDFs/
-│   └── 📁 ciberseguridad/          # 168 PDFs clasificados (≈2.5GB)
-├── 📄 generate_cybersecurity_json_v2.py    # Script principal de extracción
-├── 📄 classify_oapen_pdfs.py               # Clasificación de PDFs
-├── 📄 delete_otros_pdfs.py                 # Limpieza de archivos
-├── 📄 filter_cybersecurity_items.py        # Filtrado de items
-├── 📄 downlod_oapen_pdfs.py                # Descarga de PDFs
-├── 📄 remove_duplicates_fast.py            # Eliminación de duplicados
-├── 📄 cybersecurity_books.json             # Base de datos JSON (1.2MB)
-├── 📄 cybersecurity_books_filtered.json    # Base de datos filtrada (477MB)
-├── 📄 oapen_pdfs_clasificados.csv          # CSV de clasificación
-└── 📄 download_progress.json               # Progreso de descargas
+├── 📁 data/
+│   ├── raw/                          # Datos originales
+│   │   ├── NIST/                     # Estándares NIST (AI, CSWP, FIPS, SP)
+│   │   ├── OAPEN_PDFs/               # Documentos académicos (168 PDFs)
+│   │   ├── USENIX/                   # Papers de conferencias (36 proceedings)
+│   │   ├── AISecKG/                  # Conocimiento estructurado
+│   │   ├── AnnoCTR/                  # Reportes de amenazas (190 documentos)
+│   │   ├── MITRE/                    # ATT&CK Framework (2,658 objetos)
+│   │   └── OWASP/                    # Estándares web (4 documentos)
+│   ├── interim/                      # Datos procesados (pages.jsonl)
+│   ├── chunks/                       # Chunks para RAG (45,462 chunks)
+│   └── export/                       # Exportaciones (CSV, reportes)
+├── 📁 src/
+│   ├── rag/                          # Sistema RAG
+│   │   ├── ingest/                   # Extracción de PDFs
+│   │   ├── process/                  # Chunking y procesamiento
+│   │   ├── index/                    # Indexación en Weaviate
+│   │   ├── api/                      # API REST
+│   │   └── eval/                     # Evaluación
+│   ├── ft/                           # Fine-tuning
+│   └── common/                       # Utilidades compartidas
+├── 📁 scripts/                       # Scripts de procesamiento
+├── 📁 configs/                       # Configuraciones
+└── 📁 tests/                         # Pruebas
 ```
 
-## 🔄 Flujo de Trabajo
+## 📊 Fuentes de Datos Integradas
 
-### 1. **Extracción de Metadatos** (`generate_cybersecurity_json_v2.py`)
+### 1. **NIST (National Institute of Standards and Technology)**
+- **Tipo**: Estándares oficiales de ciberseguridad
+- **Contenido**: AI Risk Management, Cybersecurity Framework, FIPS, Special Publications
+- **Documentos**: 25+ estándares oficiales
+- **Chunks**: ~8,000 chunks
+- **Estado**: ✅ Completamente integrado
 
-**Propósito**: Buscar y extraer metadatos de documentos de ciberseguridad desde la API de OAPEN.
+### 2. **OAPEN (Open Access Publishing)**
+- **Tipo**: Documentos académicos de acceso abierto
+- **Contenido**: Libros y papers sobre ciberseguridad
+- **Documentos**: 168 PDFs académicos
+- **Chunks**: ~15,000 chunks
+- **Estado**: ✅ Completamente integrado
 
-**Características**:
-- **337 términos de búsqueda** en inglés y español
-- Categorías incluidas:
-  - Términos generales de ciberseguridad
-  - Amenazas y ataques (malware, phishing, etc.)
-  - Defensas y controles (firewalls, SIEM, etc.)
-  - Estándares y cumplimiento (ISO 27001, NIST, GDPR, etc.)
-  - Roles y equipos (CISO, analistas, etc.)
+### 3. **USENIX Conferences**
+- **Tipo**: Papers de conferencias de sistemas
+- **Contenido**: ATC, FAST, NSDI, OSDI, SOUPS, WOOT, SEC proceedings
+- **Documentos**: 36 proceedings completos
+- **Chunks**: ~18,000 chunks
+- **Estado**: ✅ Completamente integrado
 
-**Proceso**:
-```python
-# Búsqueda por términos específicos
-for term in CYBER_KEYWORDS:
-    search_url = f"{OAPEN_API_BASE}/items"
-    params = {
-        'query': term,
-        'expand': 'metadata,bitstreams',
-        'limit': 100
-    }
+### 4. **AnnoCTR (Annotated Cyber Threat Reports)**
+- **Tipo**: Reportes de amenazas cibernéticas anotados
+- **Contenido**: 400 reportes de CTI con anotaciones de expertos
+- **Documentos**: 190 reportes de amenazas
+- **Chunks**: 796 chunks
+- **Estado**: ✅ Completamente integrado
+
+### 5. **MITRE ATT&CK Framework**
+- **Tipo**: Técnicas de ataque y tácticas
+- **Contenido**: Enterprise, Mobile, ICS attack patterns
+- **Documentos**: 2,658 objetos de técnicas
+- **Chunks**: 2,759 chunks
+- **Estado**: ✅ Completamente integrado
+
+### 6. **OWASP (Open Web Application Security Project)**
+- **Tipo**: Estándares de seguridad web
+- **Contenido**: Top 10, ASVS, Testing Guide
+- **Documentos**: 4 documentos de estándares
+- **Chunks**: 21 chunks
+- **Estado**: ✅ Completamente integrado
+
+### 7. **Security Tools Documentation**
+- **Tipo**: Documentación de herramientas de ciberseguridad
+- **Contenido**: 45 herramientas especializadas con documentación completa
+- **Categorías**: 24 categorías funcionales (Network Scanning, Web Security, OSINT, etc.)
+- **Documentos**: 45 archivos de documentación mejorada
+- **Chunks**: 308 chunks
+
+### 8. **AISecKG (AI Security Knowledge Graph)**
+- **Tipo**: Conocimiento estructurado
+- **Contenido**: Grafos de conocimiento de seguridad
+- **Documentos**: Archivos de texto estructurado
+- **Chunks**: Incluido en el total
+- **Estado**: ✅ Completamente integrado
+
+## 🛠️ Scripts de Procesamiento
+
+### Scripts de Integración de Datos
+
+#### `process_annoctr_text.py`
+- **Propósito**: Procesar archivos de texto de AnnoCTR y convertirlos a formato compatible
+- **Funciones**:
+  - Convierte archivos .txt a formato pages.jsonl
+  - Crea chunks de ~400 palabras con overlap
+  - Genera metadata para cada documento
+- **Entrada**: `data/raw/AnnoCTR/text/`
+- **Salida**: `data/interim/AnnoCTR/` y `data/chunks/AnnoCTR/`
+
+#### `process_mitre_owasp.py`
+- **Propósito**: Procesar datos de MITRE ATT&CK y OWASP
+- **Funciones**:
+  - Procesa datasets de MITRE (Enterprise, Mobile, ICS)
+  - Procesa documentación de OWASP
+  - Crea chunks optimizados para cada tipo de contenido
+- **Entrada**: `data/raw/MITRE/` y `data/raw/OWASP/`
+- **Salida**: `data/interim/MITRE/`, `data/interim/OWASP/`, `data/chunks/MITRE/`, `data/chunks/OWASP/`
+
+### Scripts de Integración
+
+#### `integrate_annoctr.py`
+- **Propósito**: Integrar AnnoCTR en el sistema de chunking existente
+- **Funciones**:
+  - Consolida chunks de AnnoCTR con el sistema principal
+  - Actualiza `all_chunks.jsonl`
+  - Genera estadísticas de integración
+- **Entrada**: `data/chunks/AnnoCTR/`
+- **Salida**: `data/chunks/all_chunks.jsonl` actualizado
+
+#### `integrate_mitre_owasp.py`
+- **Propósito**: Integrar MITRE ATT&CK y OWASP en el sistema
+- **Funciones**:
+  - Consolida chunks de MITRE y OWASP
+  - Actualiza archivo consolidado
+  - Analiza estadísticas de integración
+- **Entrada**: `data/chunks/MITRE/` y `data/chunks/OWASP/`
+- **Salida**: `data/chunks/all_chunks.jsonl` actualizado
+
+## 🔄 Flujo de Procesamiento
+
+### 1. **Extracción de Datos**
+```bash
+# Procesar AnnoCTR
+python scripts/process_annoctr_text.py
+
+# Procesar MITRE y OWASP
+python scripts/process_mitre_owasp.py
 ```
 
-**Resultado**: Archivo JSON con metadatos completos de documentos encontrados.
+### 2. **Integración**
+```bash
+# Integrar AnnoCTR
+python scripts/integrate_annoctr.py
 
-### 2. **Filtrado de Items** (`filter_cybersecurity_items.py`)
+# Integrar MITRE y OWASP
+python scripts/integrate_mitre_owasp.py
+```
 
-**Propósito**: Filtrar y limpiar los metadatos extraídos para mantener solo documentos relevantes.
+### 3. **Sistema RAG**
+```bash
+# Levantar Weaviate
+bash scripts/rag/up_weaviate.sh
 
-**Criterios de filtrado**:
-- Verificación de disponibilidad de PDFs
-- Validación de metadatos completos
-- Eliminación de duplicados
+# Extraer texto de PDFs
+bash scripts/rag/10_extract.sh data/raw
 
-### 3. **Clasificación de PDFs** (`classify_oapen_pdfs.py`)
+# Generar chunks
+bash scripts/rag/20_chunk.sh
 
-**Propósito**: Clasificar automáticamente los PDFs descargados en categorías de ciberseguridad.
+# Indexar en Weaviate
+bash scripts/rag/30_index.sh
+```
 
-**Método**:
-- Análisis de títulos y metadatos
-- Clasificación basada en palabras clave
-- Generación de CSV con clasificaciones
+## 📊 Estadísticas del Sistema
 
-### 4. **Descarga de PDFs** (`downlod_oapen_pdfs.py`)
+### Datos Consolidados
+- **Total de chunks**: 45,689 chunks
+- **Fuentes integradas**: 8 fuentes de datos
+- **Documentos procesados**: 3,000+ documentos
+- **Palabras totales**: 2,000,000+ palabras
+- **Tamaño total de datos**: ~6.5GB
 
-**Propósito**: Descargar los PDFs identificados desde OAPEN.
+### Distribución por Fuente
+- **NIST, OAPEN, USENIX, AISecKG**: 41,805 chunks (91.5%)
+- **MITRE ATT&CK**: 2,759 chunks (6.0%)
+- **Security Tools**: 308 chunks (0.7%)
+- **AnnoCTR**: 796 chunks (1.7%)
+- **OWASP**: 21 chunks (0.05%)
 
-**Características**:
-- Descarga masiva con control de progreso
-- Manejo de errores y reintentos
-- Verificación de integridad de archivos
+### Herramientas de Seguridad Integradas
+- **Total de herramientas**: 45 herramientas especializadas
+- **Categorías funcionales**: 24 categorías
+- **Documentación promedio**: 2,006 palabras por herramienta
+- **Chunks generados**: 308 chunks optimizados
+- **Fuentes de documentación**: GitHub, sitios oficiales, Kali Linux
 
-### 5. **Limpieza y Organización** (`delete_otros_pdfs.py`)
+#### Categorías de Herramientas Integradas
+- **Network Scanning**: Nmap, Netcat, Masscan
+- **Web Security**: Burp Suite, ZAP, sqlmap, Nikto, WPScan
+- **Password Cracking**: John the Ripper, Hashcat, Hydra
+- **Packet Analysis**: Wireshark, Tshark, tcpdump
+- **IDS/IPS**: Snort, Suricata, OSSEC
+- **OSINT**: Maltego, Recon-ng, TheHarvester
+- **Penetration Testing**: Metasploit, SET, Gobuster
+- **Cryptography**: GnuPG, OpenSSL, VeraCrypt
+- **Wireless Security**: Aircrack-ng, Kismet
+- **Active Directory**: PingCastle, BloodHound, PowerUpSQL
+- **Security Monitoring**: Wazuh, Nagios, Zabbix
+- **Malware Analysis**: Volatility, Ghidra, OllyDbg
+- **Y más...**: 24 categorías funcionales completas
 
-**Propósito**: Eliminar PDFs que no pertenecen a la categoría de ciberseguridad.
+## 🎯 Casos de Uso
 
-**Proceso**:
-- Identificación de archivos no relevantes
-- Eliminación segura de archivos
-- Mantenimiento de la estructura organizada
+### 1. **Consultas sobre Técnicas de Ataque**
+- "¿Cómo funciona el ataque de inyección SQL?"
+- "¿Cuáles son las tácticas de MITRE ATT&CK para persistencia?"
 
-### 6. **Eliminación de Duplicados** (`remove_duplicates_fast.py`)
+### 2. **Estándares y Cumplimiento**
+- "¿Qué dice NIST sobre gestión de riesgos de IA?"
+- "¿Cuáles son los controles de OWASP Top 10?"
 
-**Propósito**: Identificar y eliminar documentos duplicados basándose en similitud de contenido.
+### 3. **Reportes de Amenazas**
+- "¿Qué amenazas cibernéticas están emergiendo?"
+- "¿Cómo se comportan los grupos de ataque actuales?"
 
-## 📊 Resultados Obtenidos
+### 4. **Investigación Académica**
+- "¿Qué investigaciones hay sobre detección de malware?"
+- "¿Cuáles son las tendencias en seguridad de sistemas?"
 
-### Colección de PDFs
-- **Total de PDFs**: 168 documentos
-- **Tamaño total**: ≈2.5GB
-- **Categoría**: Ciberseguridad y temas relacionados
-- **Formato**: PDFs académicos de acceso abierto
+### 5. **Herramientas de Seguridad**
+- "¿Cómo usar Nmap para escaneo de puertos?"
+- "¿Cuáles son las mejores prácticas con Wireshark?"
+- "¿Cómo configurar Snort para detección de intrusos?"
+- "¿Qué herramientas de OSINT están disponibles?"
 
-### Base de Datos
-- **cybersecurity_books.json**: 1.2MB (metadatos básicos)
-- **cybersecurity_books_filtered.json**: 477MB (metadatos completos)
-- **oapen_pdfs_clasificados.csv**: Clasificaciones detalladas
+## 🚀 Tecnologías Utilizadas
 
-## 🛠️ Tecnologías Utilizadas
+### Procesamiento de Datos
+- **Python 3.12**: Lenguaje principal
+- **PyMuPDF**: Extracción de texto de PDFs
+- **BeautifulSoup**: Procesamiento de HTML
+- **Readability**: Extracción de contenido principal
+- **SentenceTransformers**: Embeddings semánticos
 
-- **Python 3.13**
-- **Requests**: Para llamadas a la API de OAPEN
-- **JSON**: Manejo de metadatos
-- **CSV**: Exportación de clasificaciones
-- **API REST**: Integración con OAPEN
+### Sistema RAG
+- **Weaviate**: Base de datos vectorial
+- **FastAPI**: API REST
+- **LangChain**: Framework de RAG
+- **ChromaDB**: Almacenamiento de embeddings
 
-## 🚀 Instalación y Uso
+### Fine-tuning
+- **Hugging Face Transformers**: Modelos de lenguaje
+- **PEFT/QLoRA**: Fine-tuning eficiente
+- **LoRA**: Low-Rank Adaptation
 
-### Requisitos Previos
+## 📈 Beneficios del Sistema
+
+### 1. **Cobertura Comprehensiva**
+- Estándares oficiales (NIST, OWASP)
+- Investigación académica (OAPEN, USENIX)
+- Reportes de amenazas reales (AnnoCTR)
+- Técnicas de ataque específicas (MITRE)
+- Documentación de herramientas (45 herramientas especializadas)
+
+### 2. **Calidad de Datos**
+- Fuentes reconocidas mundialmente
+- Datos anotados por expertos
+- Actualizaciones regulares
+- Validación de calidad
+
+### 3. **Especialización**
+- Enfoque específico en ciberseguridad
+- Chunking optimizado para el dominio
+- Metadata enriquecida
+- Categorización detallada
+- Documentación técnica completa de herramientas
+
+## 🔧 Instalación y Configuración
+
+### Requisitos
 ```bash
 # Crear entorno virtual
-python3 -m venv venv
-source venv/bin/activate
+python3 -m venv .venv
+source .venv/bin/activate
 
 # Instalar dependencias
-pip install requests
+pip install -r requirements.txt
 ```
 
-### Ejecución del Proceso Completo
-
-1. **Extraer metadatos**:
+### Configuración
 ```bash
-python3 generate_cybersecurity_json_v2.py
+# Copiar archivo de configuración
+cp .env.example .env
+
+# Configurar variables de entorno
+# Editar .env con tus configuraciones
 ```
 
-2. **Filtrar items**:
-```bash
-python3 filter_cybersecurity_items.py
-```
+## 📝 Uso del Sistema
 
-3. **Descargar PDFs**:
-```bash
-python3 downlod_oapen_pdfs.py
-```
-
-4. **Clasificar documentos**:
-```bash
-python3 classify_oapen_pdfs.py
-```
-
-5. **Limpiar archivos**:
-```bash
-python3 delete_otros_pdfs.py
-```
-
-## 📈 Palabras Clave de Búsqueda
-
-### Inglés (131 términos)
-- **General**: cyber, cybersecurity, information security, privacy
-- **Amenazas**: malware, phishing, ransomware, zero-day, APT
-- **Defensas**: firewall, SIEM, EDR, MFA, encryption
-- **Estándares**: ISO 27001, NIST, GDPR, OWASP, MITRE ATT&CK
-- **Roles**: CISO, security analyst, penetration tester
-
-### Español (131 términos)
-- **General**: ciberseguridad, seguridad informática, privacidad
-- **Amenazas**: malware, phishing, ransomware, día cero, APT
-- **Defensas**: cortafuegos, SIEM, EDR, autenticación multifactor
-- **Estándares**: ISO 27001, marco NIST, RGPD, OWASP
-- **Roles**: CISO, analista de seguridad, pentester
-
-## 🔍 API de OAPEN
-
-### Endpoint Principal
-```
-https://library.oapen.org/rest/items
-```
-
-### Parámetros de Búsqueda
-- `query`: Término de búsqueda
-- `expand`: metadata,bitstreams
-- `limit`: Número máximo de resultados (100)
-
-### Ejemplo de Consulta
+### Consultas Básicas
 ```python
-search_url = "https://library.oapen.org/rest/items"
-params = {
-    'query': 'cybersecurity',
-    'expand': 'metadata,bitstreams',
-    'limit': 100
-}
+from src.rag.api.retriever import RAGRetriever
+
+retriever = RAGRetriever()
+results = retriever.query("¿Qué es el framework NIST CSF?")
 ```
 
-## 📋 Características Técnicas
-
-### Manejo de Errores
-- Timeouts de 30 segundos para requests
-- Reintentos automáticos en caso de fallos
-- Logging detallado de errores
-
-### Optimización de Rendimiento
-- Pausas entre requests (1 segundo)
-- Procesamiento por lotes
-- Eliminación de duplicados eficiente
-
-### Control de Calidad
-- Verificación de integridad de archivos
-- Validación de metadatos
-- Clasificación automática con revisión manual
-
-## 📊 Estadísticas del Proyecto
-
-- **Scripts desarrollados**: 7
-- **Términos de búsqueda**: 337
-- **Documentos procesados**: 168 PDFs
-- **Tamaño de datos**: ≈2.5GB
-- **Tiempo de procesamiento**: Variable según conectividad
-
-## 🎯 Objetivos Alcanzados
-
-✅ **Extracción automatizada** de metadatos de OAPEN  
-✅ **Búsqueda comprehensiva** con 337 términos  
-✅ **Clasificación automática** de documentos  
-✅ **Descarga masiva** de PDFs académicos  
-✅ **Organización estructurada** de la colección  
-✅ **Eliminación de duplicados** eficiente  
-✅ **Documentación completa** del proceso  
-
-## 🔮 Posibles Mejoras Futuras
-
-- Implementación de análisis de contenido con NLP
-- Clasificación automática más sofisticada
-- Integración con otras fuentes académicas
-- Dashboard web para exploración de la colección
-- Análisis de tendencias temporales en ciberseguridad
-
-## 📝 Detalles Técnicos de Implementación
-
-### Script Principal: `generate_cybersecurity_json_v2.py`
-
-**Funcionalidades principales**:
-- Lista de 337 términos de búsqueda en inglés y español
-- Búsqueda iterativa en la API de OAPEN
-- Verificación de disponibilidad de PDFs
-- Eliminación de duplicados por handle
-- Extracción de metadatos completos
-
-**Estructura de datos**:
-```python
-CYBER_KEYWORDS = [
-    # Términos generales (inglés/español)
-    "cyber", "cybersecurity", "ciberseguridad",
-    # Amenazas y ataques
-    "malware", "phishing", "ransomware",
-    # Defensas y controles
-    "firewall", "SIEM", "EDR", "MFA",
-    # Estándares y cumplimiento
-    "ISO 27001", "NIST", "GDPR", "OWASP",
-    # Roles y equipos
-    "CISO", "security analyst", "pentester"
-]
-```
-
-### Proceso de Búsqueda
-
-1. **Iteración por términos**: Cada término de búsqueda se procesa individualmente
-2. **Consulta a API**: Request con parámetros de expansión de metadatos
-3. **Filtrado de resultados**: Solo documentos con PDFs disponibles
-4. **Deduplicación**: Eliminación de documentos ya procesados
-5. **Acumulación**: Agregación de resultados únicos
-
-### Manejo de Errores
-
-- **Timeouts**: 30 segundos por request
-- **Reintentos**: Continuación en caso de fallos
-- **Logging**: Información detallada de cada operación
-- **Pausas**: 1 segundo entre requests para no sobrecargar la API
-
-## 🗂️ Organización de Archivos
-
-### Estructura de Directorios
-```
-OAPEN_PDFs/
-└── ciberseguridad/
-    ├── 9781439811658.pdf (12MB)
-    ├── 9781040306987.pdf (272MB)
-    ├── 1006885.pdf (8.9MB)
-    └── ... (168 archivos total)
-```
-
-### Archivos de Datos
-- **cybersecurity_books.json**: Metadatos básicos (1.2MB)
-- **cybersecurity_books_filtered.json**: Metadatos completos (477MB)
-- **oapen_pdfs_clasificados.csv**: Clasificaciones por categoría
-- **download_progress.json**: Estado de descargas
-
-## 🔧 Configuración del Entorno
-
-### Dependencias
+### API REST
 ```bash
-pip install requests
+# Iniciar servidor
+python src/rag/api/server.py
+
+# Consultar API
+curl -X POST "http://localhost:8000/query" \
+  -H "Content-Type: application/json" \
+  -d '{"query": "¿Cómo funciona el ataque de phishing?"}'
 ```
 
-### Variables de Configuración
-```python
-OAPEN_API_BASE = "https://library.oapen.org/rest"
-OUTPUT_JSON = "cybersecurity_books_complete.json"
-```
+## 🧪 Evaluación
 
-### Parámetros de Búsqueda
-```python
-params = {
-    'query': term,
-    'expand': 'metadata,bitstreams',
-    'limit': 100
-}
-```
+### Métricas de Calidad
+- **Precisión**: Exactitud de las respuestas
+- **Recuperación**: Cobertura de información relevante
+- **Relevancia**: Pertinencia de los resultados
+- **Completitud**: Exhaustividad de las respuestas
 
-## 📈 Métricas de Rendimiento
+### Datasets de Evaluación
+- **AnnoCTR**: Para evaluación de NER
+- **MITRE ATT&CK**: Para evaluación de técnicas
+- **NIST**: Para evaluación de estándares
 
-### Tiempo de Procesamiento
-- **Búsqueda por término**: ~1-2 segundos
-- **Total de términos**: 337
-- **Tiempo estimado**: 5-10 minutos
-- **Pausas entre requests**: 1 segundo
+## 🔮 Próximos Pasos
 
-### Uso de Recursos
-- **Memoria**: Variable según tamaño de resultados
-- **Almacenamiento**: ~2.5GB para PDFs + 478MB para metadatos
-- **Red**: ~500MB de descarga de metadatos
+### Mejoras Planificadas
+1. **Más fuentes de datos**: CVE, CWE, CAPEC
+2. **Mejores embeddings**: Modelos especializados en ciberseguridad
+3. **Reranking**: Mejora de la relevancia de resultados
+4. **Fine-tuning**: Modelos especializados en el dominio
+5. **Interfaz web**: Dashboard para consultas
+6. **Indexación en Weaviate**: Completar el sistema RAG
+7. **Evaluación de calidad**: Métricas de rendimiento del sistema
 
-## 🎓 Aplicaciones Académicas
+### Integraciones Futuras
+- **Slack/Discord**: Bots de consulta
+- **Jupyter**: Notebooks de análisis
+- **Grafana**: Dashboards de monitoreo
 
-### Investigación en Ciberseguridad
-- Análisis de tendencias en publicaciones académicas
-- Estudio de evolución de amenazas cibernéticas
-- Revisión de estándares y marcos de trabajo
+## 📄 Licencia
 
-### Minería de Datos
-- Extracción de patrones en títulos y abstracts
-- Análisis de coautoría y colaboraciones
-- Identificación de temas emergentes
+Este proyecto está bajo la licencia MIT. Ver `LICENSE` para más detalles.
 
-### Bibliometría
-- Análisis de impacto de publicaciones
-- Mapeo de redes de investigación
-- Identificación de líderes en el campo
+## 🤝 Contribuciones
+
+Las contribuciones son bienvenidas. Por favor:
+1. Fork el proyecto
+2. Crea una rama para tu feature
+3. Commit tus cambios
+4. Push a la rama
+5. Abre un Pull Request
+
+## 📞 Contacto
+
+Para preguntas o sugerencias, por favor abre un issue en el repositorio.
 
 ---
 
 **Desarrollado para investigación académica en ciberseguridad**  
-**Fuente de datos**: OAPEN (Open Access Publishing in European Networks)  
-**Última actualización**: Septiembre 2024
+**Última actualización**: Diciembre 2024 (v2.0 - Security Tools Enhanced)
 
+## 🎉 Estado Actual del Proyecto
 
-## Estructura del proyecto (RAG)
+### ✅ Completado
+- **Integración de 8 fuentes de datos** principales
+- **45,689 chunks** procesados y optimizados
+- **45 herramientas de seguridad** con documentación completa
+- **Sistema de chunking** jerárquico y semántico
+- **Limpieza y optimización** de datos raw
+- **Consolidación** en archivo único `all_chunks.jsonl`
 
-```
-tu-proyecto/
-├── README.md
-├── .gitignore
-├── pyproject.toml                # o requirements.txt
-├── docker-compose.yml            # Weaviate
-├── .env.example                  # sin claves
-├── configs/
-│   ├── rag.yaml                  # chunking/retrieval/rerank
-│   └── weaviate.schema.json      # clase BookChunk
-├── data/
-│   ├── pdfs/                     # PDFs fuente (múltiples orígenes)
-│   │   ├── OAPEN_PDFs/           # PDFs de OAPEN
-│   │   ├── USENIX/               # PDFs de USENIX (pendiente)
-│   │   └── NIST/                 # PDFs de NIST (pendiente)
-│   ├── interim/                  # texto por página, limpio (jsonl)
-│   ├── chunks/                   # *.pages.jsonl, *.chunks.jsonl, all_chunks.jsonl
-│   └── models/                   # (opcional) cache de modelos HF
-├── src/
-│   ├── ingest/
-│   │   └── extract_pdf.py        # PyMuPDF + OCR + limpieza
-│   ├── process/
-│   │   ├── chunking.py           # jerárquico + semántico (400 tok + 15%)
-│   │   └── quality.py            # banderas de calidad (ocr, vacío, etc.)
-│   ├── index/
-│   │   ├── embeddings.py         # SentenceTransformers (CPU/GPU)
-│   │   ├── weaviate_client.py    # helpers (crear clase, batch upsert, query)
-│   │   └── ingest_to_weaviate.py # lee all_chunks.jsonl → indexa
-│   ├── api/
-│   │   ├── server.py             # FastAPI: /query (híbrida) + /citations
-│   │   └── retriever.py          # híbrida + (opcional) rerank local
-│   └── eval/
-│       ├── build_eval_set.py
-│       └── evaluate_rag.py
-├── scripts/
-│   ├── up_weaviate.sh
-│   ├── 10_extract.sh
-│   ├── 20_chunk.sh
-│   ├── 30_index.sh
-│   └── 40_query_examples.sh
-└── tests/
-    ├── test_chunking.py
-    └── test_weaviate.py
-```
+### 🔄 En Progreso
+- **Indexación en Weaviate** (próximo paso)
+- **Sistema RAG** completo
+- **API REST** para consultas
 
-### Nota sobre ScriptsData
-Lo previo en `ScriptsData/` (descarga y clasificación) se mantiene como etapa de adquisición. El pipeline nuevo opera sobre PDFs ya disponibles en `data/raw/` (puedes organizar por fuente como `data/raw/OAPEN_PDFs/`, `data/raw/USENIX/`, `data/raw/NIST/`), genera `interim/*.pages.jsonl`, produce chunks en `data/chunks/*.chunks.jsonl` y consolida en `data/chunks/all_chunks.jsonl`, listo para indexar en Weaviate.
-
-### Cómo correr
-```bash
-# 1) levantar Weaviate
-bash scripts/rag/up_weaviate.sh
-
-# 2) extraer texto por página (limpio)
-# puedes apuntar a cualquier subcarpeta de data/raw/
-bash scripts/rag/10_extract.sh data/raw
-
-# 3) generar chunks jerárquicos + semánticos
-bash scripts/rag/20_chunk.sh
-
-# 4) indexar en Weaviate
-bash scripts/rag/30_index.sh
-```
-
-## Nueva estructura unificada (RAG + FT)
-
-```
-DatosTesis/
-├── README.md
-├── .gitignore
-├── .env.example
-├── docker-compose.yml
-├── requeriments.txt
-├── Makefile                      # (opcional) targets: rag-extract, rag-chunk, rag-index, ft-prepare, ft-train
-│
-├── configs/
-│   ├── rag.yaml
-│   ├── weaviate.schema.json
-│   └── ft.yaml                   # NUEVO (hp de FT: modelo base, LoRA, lr, etc.)
-│
-├── data/                         # *Data lake compartido*
-│   ├── raw/                      # PDFs originales (lo que hoy tienes en data/pdfs/*)
-│   │   ├── USENIX/
-│   │   ├── NIST/
-│   │   └── OAPEN_PDFs/...
-│   ├── interim/                  # páginas limpias por libro (*.pages.jsonl)
-│   ├── clean/                    # (si guardas normalizaciones per-page)
-│   ├── chunks/                   # *.chunks.jsonl y all_chunks.jsonl (para RAG)
-│   ├── export/                   # exports varios (ej. CSV/Parquet)
-│   ├── models/                   # (opcional) caché de modelos locales HF
-│   ├── ft_raw/                   # NUEVO: materiales base para FT (no-chunks)
-│   └── ft_datasets/              # NUEVO: datasets finales FT (train/val/test JSONL)
-│
-├── src/
-│   ├── common/                   # NUEVO: utilidades compartidas por RAG y FT
-│   │   ├── io.py                 # leer/escribir jsonl, paths, hashing source_id
-│   │   ├── textutils.py          # normalización, sent-split
-│   │   ├── licenses.py           # (opcional) control de licencias/flags
-│   │   └── evalutils.py
-│   │
-│   ├── rag/                      # (mueve aquí tu código RAG)
-│   │   ├── ingest/
-│   │   │   └── extract_pdf.py    # (lo que tienes) PyMuPDF + OCR + limpieza
-│   │   ├── process/
-│   │   │   ├── chunking.py       # (tu actual) jerárquico + semántico
-│   │   │   └── quality.py
-│   │   ├── index/
-│   │   │   ├── embeddings.py     # sentence-transformers (local)
-│   │   │   ├── ingest_to_weaviate.py
-│   │   │   └── weaviate_client.py
-│   │   ├── api/
-│   │   │   ├── retriever.py
-│   │   │   └── server.py
-│   │   └── eval/
-│   │       ├── build_eval_set.py
-│   │       └── evaluate_rag.py
-│   │
-│   └── ft/                       # NUEVO: fine-tuning separado
-│       ├── prepare_dataset.py    # crea ejemplos (prompt→respuesta, extracción, etc.)
-│       ├── train_lora.py         # HF Transformers + PEFT/QLoRA (sin OpenAI)
-│       ├── infer.py              # inferencia del checkpoint
-│       └── eval_ft.py            # métricas EM/F1/ROUGE según tarea
-│
-├── scripts/
-│   ├── rag/                      # (mueve aquí los tuyos)
-│   │   ├── up_weaviate.sh
-│   │   ├── 10_extract.sh
-│   │   ├── 20_chunk.sh
-│   │   ├── 30_index.sh
-│   │   └── 40_query_examples.sh
-│   └── ft/
-│       ├── 10_prepare.sh         # genera ft_datasets/{train,val}.jsonl
-│       ├── 20_train.sh           # lanza FT (LoRA/QLoRA)
-│       └── 30_eval.sh
-│
-└── tests/
-    ├── test_chunking.py
-    ├── test_weaviate.py
-    └── test_ft_dataset.py        # NUEVO: valida formato FT (mensajes, campos, tamaños)
-```
+### 📊 Logros Destacados
+- **Cobertura comprehensiva**: Desde estándares oficiales hasta herramientas prácticas
+- **Calidad de datos**: Documentación completa y actualizada
+- **Organización**: 24 categorías funcionales de herramientas
+- **Escalabilidad**: Sistema preparado para nuevas fuentes de datos
