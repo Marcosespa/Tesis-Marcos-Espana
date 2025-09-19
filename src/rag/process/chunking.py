@@ -10,7 +10,20 @@ Mejoras implementadas:
 - Sistema de penalización/bonus más robusto
 - Overlapping más inteligente basado en contenido
 
+
+ Explicacion de pq segui usando el all-MiniLM-L6-v2:
+ 
+ The all-* models were trained on all available training data 
+ (more than 1 billion training pairs) and are designed as general 
+ purpose models. The all-mpnet-base-v2 model provides the best
+  quality, while all-MiniLM-L6-v2 is 5 times faster and still 
+  offers good quality. Toggle All models to see all evaluated 
+  original models.
+
+  https://www.sbert.net/docs/sentence_transformer/pretrained_models.html
 """
+
+
 
 from __future__ import annotations
 import re
@@ -29,17 +42,17 @@ from pathlib import Path
 # ---------------------------------------------------------------------
 # Config refinada
 DEFAULTS = {
-    "target_tokens": 800,
-    "min_tokens": 400,
-    "max_tokens": 1200,
+    "target_tokens": 200,  # Ajustado para all-MiniLM-L6-v2 (max 256)
+    "min_tokens": 100,     # Ajustado para all-MiniLM-L6-v2
+    "max_tokens": 256,     # Límite máximo del modelo all-MiniLM-L6-v2
     "overlap_ratio": 0.18,
-    "sem_win_tokens": 500, # tamaño de la ventana para el refinado semantico
-    "sem_step_tokens": 60,
+    "sem_win_tokens": 150, # Ajustado para ventana semántica
+    "sem_step_tokens": 30,
     "smooth_k": 5,
     "mad_z_thresh": 2.5, # aca se decide cuadno se corta el chunk(se cambia de tema)
     "penalize_inside": {"code": 0.3, "table": 0.4, "figure": 0.5, "quote": 0.6},
     "bonus_anchors": {"heading": 1.4, "subtitle": 1.2, "list_start": 1.1, "paragraph_end": 1.05},
-    "max_snap_distance": 100,  # tokens máximos para snap
+    "max_snap_distance": 50,   # tokens máximos para snap (ajustado)
     "structure_weight": 0.8,   # peso para mantener estructura vs semántica
 }
 
@@ -803,7 +816,7 @@ def process_multiple_jsonl_files(
                     for key, value in doc.metadata.items():
                         if isinstance(value, (str, int, float, bool, list, dict, type(None))):
                             clean_metadata[key] = value
-        else:
+                        else:
                             clean_metadata[key] = str(value)
                     
                     chunk_data = {
