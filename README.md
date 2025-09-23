@@ -1,5 +1,41 @@
 # Sistema RAG de Ciberseguridad - DatosTesis
 
+## Improved semantic search (improved_search.py)
+
+- Búsqueda simple (multi_stage por defecto):
+
+```bash
+python src/rag/search/improved_search.py "authentication"
+```
+
+- Cambiar estrategia:
+
+```bash
+# Semantic-only
+python src/rag/search/improved_search.py "autenticación" --strategy semantic
+
+# Hybrid
+python src/rag/search/improved_search.py "sql injection" --strategy hybrid
+```
+
+- Aumentar resultados y potenciar re-ranking:
+
+```bash
+python src/rag/search/improved_search.py "authentication" --strategy multi_stage --k 15
+```
+
+- Desactivar re-ranking:
+
+```bash
+python src/rag/search/improved_search.py "authentication" --no-rerank
+```
+
+- Ajustar mínimo para re-ranking (útil si k bajo):
+
+```bash
+python src/rag/search/improved_search.py "authentication" --min-k-rerank 10
+```
+
 ## 📋 Descripción del Proyecto
 
 Este proyecto implementa un sistema RAG (Retrieval-Augmented Generation) comprehensivo para ciberseguridad, integrando múltiples fuentes de datos de alta calidad. El sistema combina estándares oficiales, investigación académica, reportes de amenazas, técnicas de ataque y documentación de herramientas para crear una base de conocimiento especializada.

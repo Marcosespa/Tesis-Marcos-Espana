@@ -20,7 +20,7 @@ def test_single_jsonl():
     base_dir = Path(__file__).parent.parent
     interim_dir = base_dir / "data" / "interim"
     
-    jsonl_files = list(interim_dir.glob("*.pages.jsonl"))
+    jsonl_files = list(interim_dir.glob("**/*.pages.jsonl"))
     if not jsonl_files:
         print(f"❌ No se encontraron archivos *.pages.jsonl en {interim_dir}")
         return False
@@ -69,7 +69,7 @@ def test_multiple_jsonl():
     output_dir = base_dir / "data" / "chunks"
     
     # Verificar que existen archivos de entrada
-    jsonl_files = list(input_dir.glob("*.pages.jsonl"))
+    jsonl_files = list(input_dir.glob("**/*.pages.jsonl"))
     if not jsonl_files:
         print(f"❌ No se encontraron archivos *.pages.jsonl en {input_dir}")
         return False

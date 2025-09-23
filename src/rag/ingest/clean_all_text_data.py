@@ -77,15 +77,21 @@ def main():
             "min_chars": 50
         },
         {
-            "name": "NIST_Docs",
-            "input": "data/raw/NIST_Docs",
-            "output": "data/interim/NIST_Docs",
+            "name": "NIST",
+            "input": "data/raw/NIST",
+            "output": "data/interim/NIST",
             "min_chars": 50
         },
         {
-            "name": "Academic_Papers",
-            "input": "data/raw/Academic_Papers",
-            "output": "data/interim/Academic_Papers",
+            "name": "OAPEN_PDFs",
+            "input": "data/raw/OAPEN_PDFs",
+            "output": "data/interim/OAPEN_PDFs",
+            "min_chars": 100
+        },
+        {
+            "name": "USENIX",
+            "input": "data/raw/USENIX",
+            "output": "data/interim/USENIX",
             "min_chars": 100
         }
     ]

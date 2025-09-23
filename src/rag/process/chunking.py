@@ -791,8 +791,8 @@ def process_multiple_jsonl_files(
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
     
-    # Buscar archivos .pages.jsonl
-    jsonl_files = list(input_path.glob("*.pages.jsonl"))
+    # Buscar archivos .pages.jsonl recursivamente
+    jsonl_files = list(input_path.glob("**/*.pages.jsonl"))
     if not jsonl_files:
         print(f"  No se encontraron archivos *.pages.jsonl en {input_dir}")
         return {}
