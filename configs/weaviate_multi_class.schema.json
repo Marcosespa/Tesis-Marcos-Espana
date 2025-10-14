@@ -1,0 +1,162 @@
+{
+  "classes": [
+    {
+      "class": "NIST_SP",
+      "description": "NIST Special Publications - Standards and guidelines",
+      "vectorizer": "none",
+      "properties": [
+        {"name": "docId", "dataType": ["text"], "indexFilterable": true},
+        {"name": "level", "dataType": ["int"]},
+        {"name": "title", "dataType": ["text"]},
+        {"name": "text", "dataType": ["text"]},
+        {"name": "pageStart", "dataType": ["int"]},
+        {"name": "pageEnd", "dataType": ["int"]},
+        {"name": "source_type", "dataType": ["text"], "indexFilterable": true},
+        {"name": "publication_number", "dataType": ["text"], "indexFilterable": true}
+      ]
+    },
+    {
+      "class": "NIST_CSWP",
+      "description": "NIST Cybersecurity White Papers",
+      "vectorizer": "none",
+      "properties": [
+        {"name": "docId", "dataType": ["text"], "indexFilterable": true},
+        {"name": "level", "dataType": ["int"]},
+        {"name": "title", "dataType": ["text"]},
+        {"name": "text", "dataType": ["text"]},
+        {"name": "pageStart", "dataType": ["int"]},
+        {"name": "pageEnd", "dataType": ["int"]},
+        {"name": "source_type", "dataType": ["text"], "indexFilterable": true},
+        {"name": "cswp_number", "dataType": ["text"], "indexFilterable": true}
+      ]
+    },
+    {
+      "class": "NIST_FIPS",
+      "description": "NIST FIPS Standards",
+      "vectorizer": "none",
+      "properties": [
+        {"name": "docId", "dataType": ["text"], "indexFilterable": true},
+        {"name": "level", "dataType": ["int"]},
+        {"name": "title", "dataType": ["text"]},
+        {"name": "text", "dataType": ["text"]},
+        {"name": "pageStart", "dataType": ["int"]},
+        {"name": "pageEnd", "dataType": ["int"]},
+        {"name": "source_type", "dataType": ["text"], "indexFilterable": true},
+        {"name": "fips_number", "dataType": ["text"], "indexFilterable": true}
+      ]
+    },
+    {
+      "class": "NIST_AI",
+      "description": "NIST AI/ML Guidelines and Standards",
+      "vectorizer": "none",
+      "properties": [
+        {"name": "docId", "dataType": ["text"], "indexFilterable": true},
+        {"name": "level", "dataType": ["int"]},
+        {"name": "title", "dataType": ["text"]},
+        {"name": "text", "dataType": ["text"]},
+        {"name": "pageStart", "dataType": ["int"]},
+        {"name": "pageEnd", "dataType": ["int"]},
+        {"name": "source_type", "dataType": ["text"], "indexFilterable": true},
+        {"name": "ai_guideline_number", "dataType": ["text"], "indexFilterable": true}
+      ]
+    },
+    {
+      "class": "USENIX",
+      "description": "USENIX Security Conference Papers",
+      "vectorizer": "none",
+      "properties": [
+        {"name": "docId", "dataType": ["text"], "indexFilterable": true},
+        {"name": "level", "dataType": ["int"]},
+        {"name": "title", "dataType": ["text"]},
+        {"name": "text", "dataType": ["text"]},
+        {"name": "pageStart", "dataType": ["int"]},
+        {"name": "pageEnd", "dataType": ["int"]},
+        {"name": "source_type", "dataType": ["text"], "indexFilterable": true},
+        {"name": "conference", "dataType": ["text"], "indexFilterable": true},
+        {"name": "year", "dataType": ["int"], "indexFilterable": true},
+        {"name": "authors", "dataType": ["text[]"]}
+      ]
+    },
+    {
+      "class": "MITRE",
+      "description": "MITRE ATT&CK Framework",
+      "vectorizer": "none",
+      "properties": [
+        {"name": "docId", "dataType": ["text"], "indexFilterable": true},
+        {"name": "level", "dataType": ["int"]},
+        {"name": "title", "dataType": ["text"]},
+        {"name": "text", "dataType": ["text"]},
+        {"name": "pageStart", "dataType": ["int"]},
+        {"name": "pageEnd", "dataType": ["int"]},
+        {"name": "source_type", "dataType": ["text"], "indexFilterable": true},
+        {"name": "tactic", "dataType": ["text"], "indexFilterable": true},
+        {"name": "technique_id", "dataType": ["text"], "indexFilterable": true},
+        {"name": "platform", "dataType": ["text[]"], "indexFilterable": true}
+      ]
+    },
+    {
+      "class": "OWASP",
+      "description": "OWASP Security Guidelines",
+      "vectorizer": "none",
+      "properties": [
+        {"name": "docId", "dataType": ["text"], "indexFilterable": true},
+        {"name": "level", "dataType": ["int"]},
+        {"name": "title", "dataType": ["text"]},
+        {"name": "text", "dataType": ["text"]},
+        {"name": "pageStart", "dataType": ["int"]},
+        {"name": "pageEnd", "dataType": ["int"]},
+        {"name": "source_type", "dataType": ["text"], "indexFilterable": true},
+        {"name": "owasp_category", "dataType": ["text"], "indexFilterable": true},
+        {"name": "risk_level", "dataType": ["text"], "indexFilterable": true}
+      ]
+    },
+    {
+      "class": "SecurityTools",
+      "description": "Security Tools Documentation",
+      "vectorizer": "none",
+      "properties": [
+        {"name": "docId", "dataType": ["text"], "indexFilterable": true},
+        {"name": "level", "dataType": ["int"]},
+        {"name": "title", "dataType": ["text"]},
+        {"name": "text", "dataType": ["text"]},
+        {"name": "pageStart", "dataType": ["int"]},
+        {"name": "pageEnd", "dataType": ["int"]},
+        {"name": "source_type", "dataType": ["text"], "indexFilterable": true},
+        {"name": "tool_category", "dataType": ["text"], "indexFilterable": true},
+        {"name": "tool_name", "dataType": ["text"], "indexFilterable": true}
+      ]
+    },
+    {
+      "class": "AISecKG",
+      "description": "AI Security Knowledge Graph",
+      "vectorizer": "none",
+      "properties": [
+        {"name": "docId", "dataType": ["text"], "indexFilterable": true},
+        {"name": "level", "dataType": ["int"]},
+        {"name": "title", "dataType": ["text"]},
+        {"name": "text", "dataType": ["text"]},
+        {"name": "pageStart", "dataType": ["int"]},
+        {"name": "pageEnd", "dataType": ["int"]},
+        {"name": "source_type", "dataType": ["text"], "indexFilterable": true},
+        {"name": "lab_id", "dataType": ["text"], "indexFilterable": true},
+        {"name": "topic", "dataType": ["text"], "indexFilterable": true}
+      ]
+    },
+    {
+      "class": "AnnoCTR",
+      "description": "Annotated Cybersecurity Training Resources",
+      "vectorizer": "none",
+      "properties": [
+        {"name": "docId", "dataType": ["text"], "indexFilterable": true},
+        {"name": "level", "dataType": ["int"]},
+        {"name": "title", "dataType": ["text"]},
+        {"name": "text", "dataType": ["text"]},
+        {"name": "pageStart", "dataType": ["int"]},
+        {"name": "pageEnd", "dataType": ["int"]},
+        {"name": "source_type", "dataType": ["text"], "indexFilterable": true},
+        {"name": "split", "dataType": ["text"], "indexFilterable": true},
+        {"name": "annotation_type", "dataType": ["text"], "indexFilterable": true}
+      ]
+    }
+  ]
+}

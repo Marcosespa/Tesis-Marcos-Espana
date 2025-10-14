@@ -1,0 +1,83 @@
+# Enhanced Multi-Class Search Configuration
+
+# Default configuration for all agents
+default:
+  embedding_model: "all-MiniLM-L6-v2"
+  rerank_model: "cross-encoder/ms-marco-MiniLM-L-2-v2"
+  hybrid_alpha: 0.7  # Weight for semantic vs keyword scoring (0-1)
+  use_cache: true
+  cache_dir: ".cache"
+  cache_ttl: 3600  # Cache TTL in seconds
+  enable_diversification: true
+  diversity_threshold: 0.85
+  max_workers: 4  # Parallel search workers
+  max_query_length: 512
+  enable_query_expansion: false  # Requires nltk
+
+# Agent-specific configurations
+agents:
+  policy:
+    description: "NIST policies and standards"
+    hybrid_alpha: 0.8  # More weight to semantic for policies
+    k_multiplier: 1.2
+    collections: ["NIST_SP", "NIST_CSWP", "NIST_FIPS"]
+    
+  research:
+    description: "USENIX research papers"
+    hybrid_alpha: 0.6  # More weight to keywords for papers
+    k_multiplier: 1.0
+    enable_query_expansion: true
+    collections: ["USENIX"]
+    
+  attack:
+    description: "MITRE ATT&CK framework"
+    hybrid_alpha: 0.9  # Very semantic for techniques
+    k_multiplier: 1.1
+    collections: ["MITRE"]
+    
+  security:
+    description: "OWASP and security tools"
+    hybrid_alpha: 0.7
+    k_multiplier: 1.0
+    collections: ["OWASP", "SecurityTools"]
+    
+  ai:
+    description: "AI security knowledge"
+    hybrid_alpha: 0.75
+    k_multiplier: 1.1
+    enable_query_expansion: true
+    collections: ["NIST_AI", "AISecKG"]
+    
+  training:
+    description: "Training resources"
+    hybrid_alpha: 0.65
+    k_multiplier: 1.0
+    collections: ["AnnoCTR"]
+    
+  general:
+    description: "All sources"
+    hybrid_alpha: 0.7
+    k_multiplier: 1.0
+    collections: []  # Will be filled with all available collections
+
+# Search quality thresholds
+quality_thresholds:
+  min_semantic_score: 0.1
+  min_hybrid_score: 0.15
+  max_results_per_collection: 50
+  min_diversity_score: 0.3
+
+# Performance settings
+performance:
+  batch_size: 64
+  search_timeout: 30  # seconds
+  cache_warmup: true
+  enable_profiling: false
+
+# Output formatting
+output:
+  use_rich: true  # Use Rich library for beautiful output
+  max_title_length: 50
+  max_content_preview: 300
+  show_score_breakdown: true
+  show_collection_stats: true

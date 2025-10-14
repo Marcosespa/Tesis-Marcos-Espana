@@ -96,7 +96,9 @@ def main():
                 md = r.get("metadata", {}) or {}
                 # Build robust identifiers across heterogeneous sources
                 doc_id = (
-                    r.get("source_id")
+                    r.get("doc_id")
+                    or md.get("doc_id")
+                    or r.get("source_id")
                     or r.get("chunk_id")
                     or md.get("source_id")
                     or md.get("file_id")
@@ -111,7 +113,8 @@ def main():
                     or "unknown"
                 )
                 title = (
-                    md.get("title")
+                    r.get("title")
+                    or md.get("title")
                     or md.get("doc_title")
                     or md.get("page_name")
                     or r.get("source_file")
@@ -119,6 +122,23 @@ def main():
                     or r.get("source_type")
                     or md.get("document_type")
                     or ""
+                )
+                # Prefer page fields from record first, then metadata; avoid using word-index fields
+                page_start = (
+                    r.get("page_start")
+                    or md.get("page_start")
+                    or r.get("page")
+                    or md.get("page")
+                    or md.get("page_num_real")
+                    or 0
+                )
+                page_end = (
+                    r.get("page_end")
+                    or md.get("page_end")
+                    or r.get("page")
+                    or md.get("page")
+                    or md.get("page_num_real")
+                    or page_start
                 )
                 properties = {
                     "docId": str(doc_id),
@@ -130,18 +150,8 @@ def main():
                     ),
                     "title": str(title),
                     "text": r.get("text") or r.get("content") or "",
-                    "pageStart": int(
-                        md.get("chunk_start_word")
-                        or md.get("page_start")
-                        or md.get("page_num_real")
-                        or 0
-                    ),
-                    "pageEnd": int(
-                        md.get("chunk_end_word")
-                        or md.get("page_end")
-                        or md.get("page_num_real")
-                        or 0
-                    ),
+                    "pageStart": int(page_start) if page_start is not None else 0,
+                    "pageEnd": int(page_end) if page_end is not None else 0,
                 }
                 # Deterministic UUID by chunk_id if present; else fallback to derived key
                 chunk_id = r.get("chunk_id") or md.get("chunk_id")

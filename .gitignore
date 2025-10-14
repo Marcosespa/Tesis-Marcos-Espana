@@ -1,20 +1,21 @@
 # === Project-specific ===
 # No subir archivos de datos pesados
-data/raw/
-data/clean/
-data/chunks/
-data/export/
-data/ft_raw/
-data/ft_datasets/
-data/models/
+data/
+!data/.gitkeep
 
 # Archivos específicos pesados
-ScriptsData/cybersecurity_books_filtered.json
+ScriptsExtractData/cybersecurity_books.json
+ScriptsExtractData/oapen_pdfs_clasificados.csv
+ScriptsExtractData/download_progress.json
 *.xlsx
 *.xls
 *.csv
 *.jsons
 *.jsonl
+
+# Archivos de configuración de Weaviate
+weaviate/
+!weaviate/.gitkeep
 
 # PDFs (todos los PDFs son pesados)
 *.pdf
@@ -61,12 +62,13 @@ logs/
 *.out
 *.err
 
-# Archivos de configuración pesados
+# Archivos de configuración pesados (pero mantener configs/ del proyecto)
 *.config
 *.conf
 *.ini
-*.yaml
-*.yml
+!configs/*.yaml
+!configs/*.yml
+!configs/*.json
 
 # === Python tooling caches ===
 .mypy_cache/

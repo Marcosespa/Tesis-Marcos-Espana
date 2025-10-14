@@ -297,23 +297,32 @@ class ImprovedSemanticSearch:
         keyword_results: List[SearchResult],
         alpha: float = 0.7
     ) -> List[SearchResult]:
-        """Fusionar y deduplicar resultados con scores normalizados"""
+        """Fusionar y deduplicar resultados con scores normalizados.
+
+        Nota: Se deduplica por (doc_id + rango de páginas), no solo por doc_id,
+        para evitar colapsar múltiples fragmentos del mismo documento en uno solo.
+        """
         
-        # Crear diccionario de resultados por doc_id
-        merged_results = {}
+        # Crear diccionario de resultados por doc_id y rango de páginas
+        merged_results: Dict[str, SearchResult] = {}
+
+        def make_key(r: SearchResult) -> str:
+            return f"{r.doc_id}|{r.page_start}-{r.page_end}"
         
         # Agregar resultados semánticos
         for result in semantic_results:
-            merged_results[result.doc_id] = result
+            key = make_key(result)
+            merged_results[key] = result
         
         # Fusionar con resultados de keywords
         for result in keyword_results:
-            if result.doc_id in merged_results:
+            key = make_key(result)
+            if key in merged_results:
                 # Fusionar scores
-                existing = merged_results[result.doc_id]
+                existing = merged_results[key]
                 existing.keyword_score = result.keyword_score
             else:
-                merged_results[result.doc_id] = result
+                merged_results[key] = result
         
         # Calcular score final combinado (ambos scores ya están en 0-1)
         for result in merged_results.values():
