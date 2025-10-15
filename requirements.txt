@@ -1,0 +1,108 @@
+# =============================================================================
+# REQUIREMENTS COMPATIBLES CON PYTHON 3.10
+# =============================================================================
+# Instalar con: pip install -r requirements.txt
+
+# -----------------------------------------------------------------------------
+# DEPENDENCIAS CORE EXISTENTES (ya instaladas en tu servidor)
+# -----------------------------------------------------------------------------
+# Procesamiento de texto y embeddings
+sentence-transformers>=5.0.0
+transformers>=4.20.0
+torch>=2.5.0
+torchvision>=0.20.0
+torchaudio>=2.5.0
+numpy>=1.21.0,<2.0.0
+scikit-learn>=1.0.0,<1.6.0
+
+# Procesamiento de documentos
+langchain>=0.3.0
+langchain-community>=0.3.0
+langchain-core>=0.3.0
+tiktoken>=0.10.0
+
+# Variables de entorno
+python-dotenv>=1.0.0
+
+# -----------------------------------------------------------------------------
+# DEPENDENCIAS ADICIONALES PARA CHUNKING
+# -----------------------------------------------------------------------------
+# Solo instalar estas si no están ya instaladas
+
+# Para procesamiento de PDFs (opcional)
+# PyMuPDF==1.26.4  # Ya instalado
+# PyPDF2==3.0.1    # Ya instalado
+
+# Para vector databases (opcional)
+# weaviate-client==4.16.9  # Ya instalado
+# faiss-cpu==1.8.0         # Ya instalado
+
+# -----------------------------------------------------------------------------
+# DEPENDENCIAS DE DESARROLLO (opcional)
+# -----------------------------------------------------------------------------
+# jupyter==1.1.1           # Ya instalado
+# ipykernel==6.29.5        # Ya instalado
+# notebook==7.3.1          # Ya instalado
+
+# -----------------------------------------------------------------------------
+# DEPENDENCIAS PARA CREWAI (ya instaladas)
+# -----------------------------------------------------------------------------
+crewai>=0.86.0
+crewai-tools>=0.14.0
+
+# -----------------------------------------------------------------------------
+# DEPENDENCIAS PARA WEB API (ya instaladas)
+# -----------------------------------------------------------------------------
+fastapi>=0.115.0
+uvicorn[standard]>=0.32.0
+python-multipart>=0.0.20
+
+# -----------------------------------------------------------------------------
+# DEPENDENCIAS PARA GPU ACCELERATION (ya instaladas)
+# -----------------------------------------------------------------------------
+accelerate>=1.2.0
+bitsandbytes>=0.46.0
+peft>=0.15.0
+datasets>=3.2.0,<4.0.0
+evaluate>=0.4.0,<0.5.0
+
+# -----------------------------------------------------------------------------
+# DEPENDENCIAS PARA MONITORING (ya instaladas)
+# -----------------------------------------------------------------------------
+wandb>=0.18.0
+tensorboard>=2.18.0
+
+# -----------------------------------------------------------------------------
+# UTILIDADES (ya instaladas)
+# -----------------------------------------------------------------------------
+pandas>=2.2.0
+rich>=13.9.0
+colorama>=0.4.6
+psutil>=6.1.0
+termcolor>=2.4.0
+
+# -----------------------------------------------------------------------------
+# APIS EXTERNAS (ya instaladas)
+# -----------------------------------------------------------------------------
+openai>=1.59.0
+anthropic>=0.37.0
+
+# -----------------------------------------------------------------------------
+# NOTAS IMPORTANTES - PYTHON 3.10
+# -----------------------------------------------------------------------------
+# 1. Todas las versiones son compatibles con Python 3.10
+# 2. numpy limitado a <2.0.0 (Python 3.10 no soporta numpy 2.x)
+# 3. scikit-learn limitado a <1.6.0 para compatibilidad
+# 4. Para verificar instalación: pip list | grep -E "(torch|sentence|transformers)"
+
+# -----------------------------------------------------------------------------
+# COMANDOS DE VERIFICACIÓN
+# -----------------------------------------------------------------------------
+# Verificar PyTorch CUDA:
+# python -c "import torch; print(f'CUDA: {torch.cuda.is_available()}, GPUs: {torch.cuda.device_count()}')"
+
+# Verificar SentenceTransformers:
+# python -c "from sentence_transformers import SentenceTransformer; print('✅ SentenceTransformers OK')"
+
+# Verificar dependencias del proyecto:
+# python -c "import langchain, tiktoken, sklearn, numpy; print('✅ Dependencias core OK')"

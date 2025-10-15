@@ -28,6 +28,13 @@ import argparse
 import json
 import time
 from pathlib import Path
+import os
+
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except Exception:
+    pass
 
 def run_rag_pipeline():
 
@@ -126,11 +133,12 @@ def run_ft_pipeline():
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Pipeline RAG/FT")
-    parser.add_argument("--step", choices=["pdf-process-rawToInterim", "txt-process-rawToInterim", "extract", "catalog", "chunk", "all"], default="all",
-                        help="Paso a ejecutar: pdf-process-rawToInterim, txt-process-rawToInterim, extract, catalog, chunk o all")
+    parser.add_argument("--step", choices=["pdf-process-rawToInterim", "txt-process-rawToInterim", "extract", "catalog", "chunk", "embeddings", "all"], default="all",
+                        help="Paso a ejecutar: pdf-process-rawToInterim, txt-process-rawToInterim, extract, catalog, chunk, embeddings o all")
     parser.add_argument("--embed-model", default="all-MiniLM-L6-v2", help="Modelo de embeddings para chunking")
     parser.add_argument("--interim", default="data/interim", help="Directorio con .pages.jsonl por categoría")
     parser.add_argument("--chunks", default="data/chunks", help="Directorio de salida para chunks")
+    parser.add_argument("--device", default=os.getenv("GPU_DEVICE") or (f"cuda:{os.getenv('GPU_ID')}" if os.getenv("GPU_ID") else None), help="Dispositivo para PyTorch/SentenceTransformers: p.ej. cuda:1 o cpu")
     args = parser.parse_args()
 
     def run_extract():
@@ -169,39 +177,22 @@ if __name__ == "__main__":
 
     def run_chunk():
         """Procesar todos los archivos JSONL usando el sistema de chunking mejorado"""
-        import sys
-        sys.path.append('scripts/processData/interim_to_chunks')
-        from chunking import hybrid_chunk_jsonl
-        from concurrent.futures import ThreadPoolExecutor, as_completed
+        from src.rag.process.chunking import process_multiple_jsonl_files
         import time
-        
+
         base_in = Path(args.interim)
         base_out = Path(args.chunks)
         base_out.mkdir(parents=True, exist_ok=True)
-        
-        # Configuración de chunking
+
+        # Configuración de chunking (defaults; el módulo también lee .env)
         config = {
             "target_tokens": 200,
             "min_tokens": 100,
             "max_tokens": 256,
             "overlap_ratio": 0.18,
-            "embed_model": args.embed_model
+            "embed_model": args.embed_model,
         }
-        
-        def find_jsonl_files(directory):
-            """Encuentra todos los archivos JSONL en un directorio"""
-            jsonl_files = []
-            for pattern in ["*.jsonl", "**/*.jsonl"]:
-                jsonl_files.extend(directory.glob(pattern))
-            
-            # Filtrar archivos que parecen ser de páginas/documentos
-            filtered_files = []
-            for file_path in jsonl_files:
-                if any(keyword in file_path.name.lower() for keyword in ['pages', 'documents', 'all_documents']):
-                    filtered_files.append(file_path)
-            
-            return sorted(filtered_files)
-        
+
         def validate_and_clean_metadata(metadata, chunk_id):
             """Valida y limpia metadatos según los estándares definidos"""
             import sys
@@ -239,114 +230,72 @@ if __name__ == "__main__":
             
             return clean_metadata
         
-        def process_single_file(jsonl_path, output_dir):
-            """Procesa un archivo JSONL individual"""
-            try:
-                print(f"  📄 Procesando: {jsonl_path.name}")
-                
-                # Procesar el archivo
-                documents = hybrid_chunk_jsonl(str(jsonl_path), **config)
-                
-                # Crear nombre de archivo de salida
-                output_filename = f"{jsonl_path.stem}.chunks.jsonl"
-                output_path = output_dir / output_filename
-                
-                # Guardar resultados con validación de metadata
-                with open(output_path, 'w', encoding='utf-8') as f:
-                    for i, doc in enumerate(documents):
-                        # Validar y limpiar metadatos según estándares
-                        clean_metadata = validate_and_clean_metadata(doc.metadata, i)
-                        
-                        chunk_data = {
-                            "id": i,
-                            "content": doc.page_content,
-                            "metadata": clean_metadata
-                        }
-                        f.write(json.dumps(chunk_data, ensure_ascii=False) + "\n")
-                
-                print(f"    ✅ {len(documents)} chunks guardados en {output_filename}")
-                return {
-                    "file": str(jsonl_path),
-                    "chunks": len(documents),
-                    "output": str(output_path),
-                    "status": "success"
-                }
-                
-            except Exception as e:
-                print(f"    ❌ Error procesando {jsonl_path.name}: {e}")
-                return {
-                    "file": str(jsonl_path),
-                    "chunks": 0,
-                    "output": None,
-                    "status": "error",
-                    "error": str(e)
-                }
-        
         print(">>> [RAG] Iniciando chunking de todos los archivos JSONL")
-        print(f"📊 Configuración: target={config['target_tokens']}, min={config['min_tokens']}, max={config['max_tokens']}")
-        
-        # Buscar todos los archivos JSONL
-        all_jsonl_files = find_jsonl_files(base_in)
-        
-        if not all_jsonl_files:
-            print("❌ No se encontraron archivos JSONL para procesar")
-            return
-        
-        print(f"📁 Encontrados {len(all_jsonl_files)} archivos JSONL")
-        
-        # Procesar archivos por categoría
-        results = []
+        print(f"📊 Configuración: target={config['target_tokens']}, min={config['min_tokens']}, max={config['max_tokens']}, device={args.device}")
+
         start_time = time.time()
-        
-        for sub_dir in sorted([p for p in base_in.iterdir() if p.is_dir()]):
-            print(f"\n📂 Procesando categoría: {sub_dir.name}")
-            
-            # Buscar archivos JSONL en esta categoría
-            category_files = find_jsonl_files(sub_dir)
-            
-            if not category_files:
-                print(f"  ⚠️  No hay archivos JSONL en {sub_dir.name}")
-                continue
-            
-            # Crear directorio de salida para esta categoría
-            out_dir = base_out / sub_dir.name
-            out_dir.mkdir(parents=True, exist_ok=True)
-            
-            # Procesar archivos de esta categoría
-            for jsonl_file in category_files:
-                result = process_single_file(jsonl_file, out_dir)
-                results.append(result)
-        
-        # Estadísticas finales
-        end_time = time.time()
-        duration = end_time - start_time
-        
-        successful = [r for r in results if r["status"] == "success"]
-        failed = [r for r in results if r["status"] == "error"]
-        total_chunks = sum(r["chunks"] for r in successful)
-        
+        # Delega al motor robusto que valida, preserva estructura y soporta device
+        try:
+            process_multiple_jsonl_files(
+                input_path=str(base_in),
+                output_path=str(base_out),
+                device=args.device,
+                embed_model=args.embed_model,
+                target_tokens=config["target_tokens"],
+                min_tokens=config["min_tokens"],
+                max_tokens=config["max_tokens"],
+                overlap_ratio=config["overlap_ratio"],
+            )
+        except TypeError:
+            # Compatibilidad si la firma difiere; al menos pasa rutas y device
+            process_multiple_jsonl_files(
+                str(base_in),
+                str(base_out),
+                device=args.device,
+            )
+
+        duration = time.time() - start_time
         print(f"\n📊 RESUMEN DEL CHUNKING")
         print(f"{'='*50}")
         print(f"⏱️  Tiempo total: {duration:.1f} segundos")
-        print(f"✅ Archivos exitosos: {len(successful)}")
-        print(f"❌ Archivos fallidos: {len(failed)}")
-        print(f"📄 Total de chunks generados: {total_chunks}")
         print(f"📁 Directorio de salida: {base_out}")
-        
-        if successful:
-            print(f"\n📋 ARCHIVOS PROCESADOS:")
-            for result in successful:
-                file_name = Path(result['file']).name
-                print(f"   • {file_name}: {result['chunks']} chunks")
-        
-        if failed:
-            print(f"\n❌ ARCHIVOS CON ERRORES:")
-            for result in failed:
-                file_name = Path(result['file']).name
-                print(f"   • {file_name}: {result['error']}")
-        
-        # Archivo global deshabilitado para RAG agéntico
-        # Los chunks se mantienen organizados por categorías para mejor rendimiento
+
+    def run_embeddings():
+        """Generar y guardar embeddings localmente para todos los .chunks.jsonl"""
+        import subprocess
+
+        chunks_root = Path(args.chunks)
+        out_root = Path("data/embeddings")
+        out_root.mkdir(parents=True, exist_ok=True)
+
+        chunk_files = sorted(chunks_root.glob("**/*.chunks.jsonl"))
+        if not chunk_files:
+            print("❌ No se encontraron archivos *.chunks.jsonl en data/chunks")
+            return
+
+        print(f"🚀 Generando embeddings para {len(chunk_files)} archivos... (device={args.device})")
+        for cf in chunk_files:
+            rel = cf.relative_to(chunks_root)
+            out_dir = out_root / rel.parent
+            out_dir.mkdir(parents=True, exist_ok=True)
+
+            cmd = [
+                sys.executable,
+                "src/rag/index/ingest_weaviate.py",
+                "--jsonl", str(cf),
+                "--save-embeddings",
+                "--embeddings-dir", str(out_dir),
+                "--batch", "128",
+                "--model", args.embed_model,
+            ]
+            if args.device:
+                cmd.extend(["--device", args.device])
+
+            print(f"  ▶️  {cf}")
+            try:
+                subprocess.run(cmd, check=True)
+            except subprocess.CalledProcessError as e:
+                print(f"    ❌ Error generando embeddings para {cf}: {e}")
 
     if args.step == "pdf-process-rawToInterim":
         run_pdf_process()
@@ -358,6 +307,8 @@ if __name__ == "__main__":
         run_catalog()
     elif args.step == "chunk":
         run_chunk()
+    elif args.step == "embeddings":
+        run_embeddings()
     else:
         # all
         run_pdf_process()
@@ -365,3 +316,4 @@ if __name__ == "__main__":
         run_extract()
         run_catalog()
         run_chunk()
+        run_embeddings()

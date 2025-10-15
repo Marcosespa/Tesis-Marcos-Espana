@@ -29,6 +29,7 @@ from __future__ import annotations
 import re
 import math
 import hashlib
+import os
 from dataclasses import dataclass, field
 from typing import List, Dict, Any, Optional, Tuple, Set
 import numpy as np
@@ -38,6 +39,10 @@ from langchain.schema import Document
 from sentence_transformers import SentenceTransformer
 import json
 from pathlib import Path
+from dotenv import load_dotenv
+
+# Cargar variables de entorno
+load_dotenv()
 
 # ---------------------------------------------------------------------
 # Config refinada
@@ -660,29 +665,52 @@ def smart_overlap(chunks: List[str], overlap_ratio: float, model_name: str) -> L
 def hybrid_chunk_jsonl(
     jsonl_path: str,
     *,
-    embed_model: str = "all-MiniLM-L6-v2",
-    token_model: str = "gpt-4o-mini",
-    target_tokens: int = DEFAULTS["target_tokens"],
-    min_tokens: int = DEFAULTS["min_tokens"],
-    max_tokens: int = DEFAULTS["max_tokens"],
-    overlap_ratio: float = DEFAULTS["overlap_ratio"],
-    sem_win_tokens: int = DEFAULTS["sem_win_tokens"],
-    sem_step_tokens: int = DEFAULTS["sem_step_tokens"],
-    smooth_k: int = DEFAULTS["smooth_k"],
-    mad_z_thresh: float = DEFAULTS["mad_z_thresh"],
+    embed_model: str = None,
+    token_model: str = None,
+    target_tokens: int = None,
+    min_tokens: int = None,
+    max_tokens: int = None,
+    overlap_ratio: float = None,
+    sem_win_tokens: int = None,
+    sem_step_tokens: int = None,
+    smooth_k: int = None,
+    mad_z_thresh: float = None,
     penalize_inside: Dict[str, float] = None,
     bonus_anchors: Dict[str, float] = None,
-    structure_weight: float = DEFAULTS["structure_weight"],
-    max_snap_distance: int = DEFAULTS["max_snap_distance"],
+    structure_weight: float = None,
+    max_snap_distance: int = None,
+    device: str = None,
 ) -> List[Document]:
     """
     Pipeline principal para procesar archivos .pages.jsonl existentes.
     """
+    # Usar variables de entorno o defaults
+    embed_model = embed_model or os.getenv("EMBED_MODEL", "all-MiniLM-L6-v2")
+    token_model = token_model or os.getenv("TOKEN_MODEL", "gpt-4o-mini")
+    target_tokens = target_tokens or int(os.getenv("TARGET_TOKENS", DEFAULTS["target_tokens"]))
+    min_tokens = min_tokens or int(os.getenv("MIN_TOKENS", DEFAULTS["min_tokens"]))
+    max_tokens = max_tokens or int(os.getenv("MAX_TOKENS", DEFAULTS["max_tokens"]))
+    overlap_ratio = overlap_ratio or float(os.getenv("OVERLAP_RATIO", DEFAULTS["overlap_ratio"]))
+    sem_win_tokens = sem_win_tokens or int(os.getenv("SEM_WIN_TOKENS", DEFAULTS["sem_win_tokens"]))
+    sem_step_tokens = sem_step_tokens or int(os.getenv("SEM_STEP_TOKENS", DEFAULTS["sem_step_tokens"]))
+    smooth_k = smooth_k or int(os.getenv("SMOOTH_K", DEFAULTS["smooth_k"]))
+    mad_z_thresh = mad_z_thresh or float(os.getenv("MAD_Z_THRESH", DEFAULTS["mad_z_thresh"]))
+    structure_weight = structure_weight or float(os.getenv("STRUCTURE_WEIGHT", DEFAULTS["structure_weight"]))
+    max_snap_distance = max_snap_distance or int(os.getenv("MAX_SNAP_DISTANCE", DEFAULTS["max_snap_distance"]))
+    
     # Usar defaults si no se proporcionan
     penalize_inside = penalize_inside or DEFAULTS["penalize_inside"]
     bonus_anchors = bonus_anchors or DEFAULTS["bonus_anchors"]
     
     print(f"  Procesando JSONL: {jsonl_path}")
+    
+    # 0) Validar archivo antes de procesar
+    is_valid, reason = validate_jsonl_file(Path(jsonl_path))
+    if not is_valid:
+        print(f"    ⚠️  Archivo inválido: {reason}")
+        return []  # Retornar lista vacía para archivos inválidos
+    
+    print(f"    ✅ {reason}")
     
     # 1) Parse jerárquico de JSONL
     print("  Paso 1: Análisis jerárquico de JSONL...")
@@ -700,7 +728,7 @@ def hybrid_chunk_jsonl(
     
     # 3) Refinado semántico selectivo
     print("   Paso 3: Refinado semántico...")
-    embedder = Embedder(model=embed_model)
+    embedder = Embedder(model=embed_model, device=device)
     
     final_items = []
     semantic_refined = 0
@@ -779,9 +807,50 @@ def hybrid_chunk_jsonl(
 # ---------------------------------------------------------------------
 # Función para procesar múltiples archivos JSONL
 
+def validate_jsonl_file(jsonl_file: Path) -> tuple[bool, str]:
+    """
+    Valida si un archivo JSONL tiene contenido válido para chunking.
+    
+    Returns:
+        tuple: (is_valid, reason)
+    """
+    try:
+        with open(jsonl_file, 'r', encoding='utf-8') as f:
+            total_text_length = 0
+            page_count = 0
+            
+            for line in f:
+                if not line.strip():
+                    continue
+                    
+                try:
+                    data = json.loads(line)
+                    text = data.get('text', '')
+                    if text and text.strip():
+                        total_text_length += len(text.strip())
+                    page_count += 1
+                except json.JSONDecodeError:
+                    continue
+            
+            # Validaciones
+            if page_count == 0:
+                return False, "archivo vacío o corrupto"
+            
+            if total_text_length == 0:
+                return False, "sin contenido de texto"
+            
+            if total_text_length < 20:  # Mínimo 50 caracteres
+                return False, f"texto insuficiente ({total_text_length} chars)"
+            
+            return True, f"válido ({total_text_length} chars, {page_count} páginas)"
+            
+    except Exception as e:
+        return False, f"error de lectura: {e}"
+
 def process_multiple_jsonl_files(
     input_dir: str,
     output_dir: str,
+    device: str = None,
     **kwargs
 ) -> Dict[str, List[Document]]:
     """
@@ -799,16 +868,29 @@ def process_multiple_jsonl_files(
     
     results = {}
     total_chunks = 0
+    skipped_files = 0
     
     for jsonl_file in jsonl_files:
         print(f"\n  Procesando: {jsonl_file.name}")
         
+        # Validar archivo antes de procesar
+        is_valid, reason = validate_jsonl_file(jsonl_file)
+        if not is_valid:
+            print(f"    ⚠️  Saltando: {reason}")
+            skipped_files += 1
+            continue
+        
+        print(f"    ✅ {reason}")
+        
         try:
             # Procesar archivo
-            documents = hybrid_chunk_jsonl(str(jsonl_file), **kwargs)
+            documents = hybrid_chunk_jsonl(str(jsonl_file), device=device, **kwargs)
             
-            # Guardar resultados
-            output_file = output_path / f"{jsonl_file.stem.replace('.pages', '')}.chunks.jsonl"
+            # Guardar resultados preservando estructura de carpetas
+            relative_path = jsonl_file.relative_to(input_path)
+            output_subdir = output_path / relative_path.parent
+            output_subdir.mkdir(parents=True, exist_ok=True)
+            output_file = output_subdir / f"{jsonl_file.stem.replace('.pages', '')}.chunks.jsonl"
             with open(output_file, 'w', encoding='utf-8') as f:
                 for doc in documents:
                     # Limpiar metadatos para serialización JSON
@@ -855,7 +937,10 @@ def process_multiple_jsonl_files(
     
     print(f"\nProcesamiento completado:")
     print(f"    Total de chunks: {total_chunks}")
-    print(f"   Archivos procesados: {len(results)}")
+    print(f"    Archivos procesados: {len(results)}")
+    print(f"    Archivos saltados: {skipped_files}")
+    if skipped_files > 0:
+        print(f"    📋 Razones: archivos vacíos, texto insuficiente, o corruptos")
     print(f"  Archivo global: {global_file}")
     
     return results
@@ -1025,22 +1110,46 @@ def split_text_by_token_cuts(text: str, token_cuts: List[int], model_name: str) 
 # Clase Embedder mejorada
 
 class Embedder:
-    def __init__(self, model: str = "all-MiniLM-L6-v2"):
-        self.model = model
+    def __init__(self, model: str = None, device: str = None):
+        # Usar variables de entorno o defaults
+        self.model = model or os.getenv("EMBED_MODEL", "all-MiniLM-L6-v2")
         self.cache: Dict[str, np.ndarray] = {}
+        
+        # Determinar dispositivo GPU desde variables de entorno
+        if device is None:
+            # Prioridad: ENV var -> auto-detección
+            env_device = os.getenv("GPU_DEVICE")
+            if env_device:
+                self.device = env_device
+                print(f"🔧 Usando dispositivo desde .env: {self.device}")
+            else:
+                import torch
+                if torch.cuda.is_available():
+                    # Intentar usar GPU específica desde ENV, sino usar cuda:1
+                    gpu_id = os.getenv("GPU_ID", "1")
+                    self.device = f"cuda:{gpu_id}"
+                    print(f"🚀 Usando GPU {gpu_id} para embeddings")
+                else:
+                    self.device = "cpu"
+                    print("⚠️  CUDA no disponible, usando CPU")
+        else:
+            self.device = device
+            print(f"🔧 Usando dispositivo especificado: {self.device}")
         
         # Preferencia: Sentence-Transformers → TF-IDF
         if SentenceTransformer is not None:
             try:
                 st_name = self.model if self.model else "all-MiniLM-L6-v2"
-                self._st_model = SentenceTransformer(st_name)
+                self._st_model = SentenceTransformer(st_name, device=self.device)
                 self.use_st = True
-            except Exception:
-                print( "Sentence-Transformers no disponible, usando TF-IDF")
+                print(f"✅ Modelo {st_name} cargado en {self.device}")
+            except Exception as e:
+                print(f"⚠️  Sentence-Transformers no disponible: {e}")
+                print("   Usando TF-IDF como fallback")
                 self._st_model = None
                 self.use_st = False
         else:
-            print(" Sentence-Transformers no instalado, usando TF-IDF")
+            print("⚠️  Sentence-Transformers no instalado, usando TF-IDF")
             self._st_model = None
             self.use_st = False
 
@@ -1281,6 +1390,7 @@ if __name__ == "__main__":
         parser.add_argument("--input-dir", help="Directorio de entrada con archivos .pages.jsonl")
         parser.add_argument("--output-dir", help="Directorio de salida para múltiples archivos")
         parser.add_argument("--embed-model", default="all-MiniLM-L6-v2", help="Modelo de embeddings (e.g., all-MiniLM-L6-v2)")
+        parser.add_argument("--device", default=None, help="Dispositivo para embeddings (e.g., cuda:1, cpu)")
         parser.add_argument("--target-tokens", type=int, default=900, help="Tokens objetivo por chunk")
         parser.add_argument("--min-tokens", type=int, default=400, help="Tokens mínimos por chunk")
         parser.add_argument("--max-tokens", type=int, default=1400, help="Tokens máximos por chunk")
@@ -1299,6 +1409,7 @@ if __name__ == "__main__":
             results = process_multiple_jsonl_files(
                 input_dir=args.input_dir,
                 output_dir=args.output_dir,
+                device=args.device,
                 embed_model=args.embed_model,
                 target_tokens=args.target_tokens,
                 min_tokens=args.min_tokens,
@@ -1325,6 +1436,7 @@ if __name__ == "__main__":
                 documents = hybrid_chunk_jsonl(
                     jsonl_path=str(input_path),
                     embed_model=args.embed_model,
+                    device=args.device,
                     target_tokens=args.target_tokens,
                     min_tokens=args.min_tokens,
                     max_tokens=args.max_tokens,

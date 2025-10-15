@@ -113,3 +113,67 @@ tensorboard/
 
 # === Data artifacts (pipeline outputs) ===
 # Ya incluido arriba en la sección de archivos pesados
+
+# === Proyecto específico - Archivos generados ===
+# Scripts temporales
+generate_embeddings_only.py
+parallel_chunking.py
+distribute_folders.py
+
+# Archivos de configuración de entorno específicos
+.env
+.env.local
+.env.production
+env.server
+venvMarcos/
+
+# Archivos de chunks y embeddings (ya incluidos en data/)
+# pero especificar por si acaso
+data/chunks/
+data/embeddings/
+data/interim/
+data/raw/
+
+# Archivos de logs del pipeline
+pipeline.log
+chunking.log
+embeddings.log
+
+# Archivos temporales del sistema
+*.tmp
+*.temp
+*.pid
+*.lock
+
+# Archivos de backup automáticos
+*~
+*.backup
+*.orig
+
+# Archivos de configuración específicos del servidor
+server_config.json
+local_config.yaml
+
+# Archivos de datos intermedios
+*.interim
+*.processed
+*.chunks
+*.embeddings
+
+# Archivos de metadata grandes
+*.metadata
+*.index
+
+# Archivos de cache específicos
+.cache/
+cache/
+__cache__/
+
+# Archivos de Jupyter notebook checkpoints
+.ipynb_checkpoints/
+
+# Archivos de Weaviate específicos
+weaviate_data/
+*.db
+*.sqlite
+*.sqlite3
