@@ -253,13 +253,14 @@ def create_query_reformulator(llm) -> Agent:
         backstory=(
             "Eres un experto en optimización de queries para cualquier tema. "
             "Tu trabajo es tomar la query del usuario y generar variaciones útiles "
-            "para búsqueda. Siempre produces resultados rápidamente sin loops innecesarios."
+            "para búsqueda. Usas la herramienta expand_query UNA SOLA VEZ y luego "
+            "generas tu respuesta final sin repetir entradas."
         ),
         tools=[expand_query],
         llm=llm,
         verbose=True,
         allow_delegation=False,
-        max_iter=3  # Limitar iteraciones para evitar loops
+        max_iter=1  # Solo 1 iteración para evitar loops
     )
 
 
@@ -314,8 +315,11 @@ def create_reformulation_task(agent: Agent, query: str) -> Task:
         description=(
             f"Mejora esta consulta para optimizar la búsqueda:\n\n"
             f"Query original: '{query}'\n\n"
-            f"Usa la herramienta 'expand_query' UNA SOLA VEZ para generar variaciones útiles.\n"
-            f"No repitas la misma entrada. Genera variaciones diferentes si es necesario.\n\n"
+            f"Instrucciones:\n"
+            f"1. Usa la herramienta 'expand_query' UNA SOLA VEZ\n"
+            f"2. Después de obtener las variaciones, genera tu respuesta final\n"
+            f"3. NO repitas la misma entrada\n"
+            f"4. NO uses 'expand_query (again)'\n\n"
             f"Formato de salida: Lista de queries optimizadas."
         ),
         agent=agent,
@@ -340,7 +344,7 @@ def create_search_and_generate_task(agent: Agent, query: str) -> Task:
             f"3. Genera una respuesta completa y detallada\n\n"
             f"Requisitos OBLIGATORIOS de la respuesta:\n"
             f"- Responde en español, de forma clara y concisa\n"
-            f"- Mínimo 200 palabras\n"
+            f"- Mínimo 50 palabras\n"
             f"- SIEMPRE cita fuentes con [n] al final de cada afirmación\n"
             f"- Si hay pasos prácticos, usa listas numeradas\n"
             f"- Si la evidencia es insuficiente, sé explícito\n"
@@ -351,7 +355,7 @@ def create_search_and_generate_task(agent: Agent, query: str) -> Task:
         agent=agent,
         expected_output=(
             "Respuesta completa en español con:\n"
-            "- Respuesta principal (mínimo 200 palabras)\n"
+            "- Respuesta principal (mínimo 50 palabras)\n"
             "- Citas inline con [n]\n"
             "- Sección 'Fuentes:' al final\n"
             "- Indicación clara si falta información"
@@ -492,15 +496,22 @@ class CrewAIAgenticRAG:
                     # Si no se puede parsear, aprobar por defecto
                     break
             
-            # Resultado final
-            return {
-                "query": rag_context.original_query,
-                "final_query": current_query,
-                "answer": rag_context.current_answer or str(result),
-                "passages": rag_context.retrieved_passages,
-                "iterations": rag_context.iterations,
-                "agents_used": list(self.agents.keys())
-            }
+        # Resultado final - Extraer la respuesta real del Search & Answer Specialist
+        final_answer = rag_context.current_answer or str(result)
+        
+        # Si el resultado es solo "APPROVE", buscar la respuesta real en el contexto
+        if "APPROVE" in str(result) and len(str(result)) < 100:
+            # La respuesta real está en el contexto de los agentes
+            final_answer = "Respuesta no disponible - el agente Search & Answer Specialist debería haber generado la respuesta completa"
+        
+        return {
+            "query": rag_context.original_query,
+            "final_query": current_query,
+            "answer": final_answer,
+            "passages": rag_context.retrieved_passages,
+            "iterations": rag_context.iterations,
+            "agents_used": list(self.agents.keys())
+        }
             
         except KeyboardInterrupt:
             print("\n⚠️ Interrumpido por usuario")
