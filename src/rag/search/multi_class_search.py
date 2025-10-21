@@ -142,14 +142,14 @@ class MultiClassSemanticSearch:
         self.tfidf_fitted = False
         self.tfidf_corpus = []
         
+        # Logger (must be first)
+        self.logger = self._setup_logger()
+        
         # Cache setup
         self.cache_dir = Path(self.config.cache_dir)
         self.cache_dir.mkdir(exist_ok=True)
         self.query_cache = {}
         self._load_cache()
-        
-        # Logger
-        self.logger = self._setup_logger()
         
         # Initialize collections
         self._initialize_collections()
