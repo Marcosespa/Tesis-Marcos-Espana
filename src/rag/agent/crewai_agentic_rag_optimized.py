@@ -304,7 +304,7 @@ def create_quality_evaluation_task(agent: Agent, query: str, final_answer: str, 
             f"   - Does it provide useful information?\n\n"
             f"2. GROUNDEDNESS (0-10):\n"
             f"   - Are claims supported by the retrieved documents?\n"
-            f"   - Are citations accurate and relevant?\n"
+            f"   - Is there supporting evidence in retrieved docs?\n"
             f"   - Is there evidence for each major claim?\n\n"
             f"3. COMPLETENESS (0-10):\n"
             f"   - Is the answer comprehensive?\n"
@@ -408,12 +408,22 @@ class OptimizedCrewAIRAG:
                     current_query
                 )
                 
+                # Execute HyDE task first to get the hypothetical answer
+                hyde_crew = Crew(
+                    agents=[self.agents["hyde_generator"]],
+                    tasks=[hyde_task],
+                    process=Process.sequential,
+                    verbose=verbose
+                )
+                hyde_result = hyde_crew.kickoff()
+                hypothetical_answer = str(hyde_result)
+                
                 # Phase 2: Retrieval & Response
                 print("\n🔍✍️ Phase 2: Retrieval & Response")
                 retrieval_task = create_retrieval_response_task(
                     self.agents["retrieval_response"],
                     current_query,
-                    "Generated hypothetical answer will be used for search"
+                    hypothetical_answer
                 )
                 
                 # Phase 3: Quality Evaluation

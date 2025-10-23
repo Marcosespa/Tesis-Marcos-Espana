@@ -32,6 +32,7 @@ import numpy as np
 from sklearn.metrics.pairwise import cosine_similarity
 from sklearn.feature_extraction.text import TfidfVectorizer
 import joblib
+from rank_bm25 import BM25Okapi
 
 # Optional: Rich for beautiful terminal output
 try:
@@ -73,7 +74,7 @@ class SearchConfig:
     max_query_length: int = 512
     enable_query_expansion: bool = False  # Disabled by default (requires nltk)
     enable_diversification: bool = True
-    diversity_threshold: float = 0.85
+    diversity_threshold: float = 0.90
     max_workers: int = 4  # For parallel search
 
 
@@ -250,33 +251,31 @@ class MultiClassSemanticSearch:
             return query
     
     def _calculate_bm25_score(self, query: str, document: str) -> float:
-        """Calculate BM25-like score for keyword matching."""
-        query_terms = set(query.lower().split())
-        doc_terms = document.lower().split()
-        
-        if not query_terms or not doc_terms:
+        """Calculate BM25 score using rank-bm25 library."""
+        if not query or not document:
             return 0.0
         
-        # Term frequency
-        doc_counter = Counter(doc_terms)
-        doc_length = len(doc_terms)
-        avg_doc_length = 100  # Assumed average
+        # Tokenize query and document
+        query_tokens = query.lower().split()
+        doc_tokens = document.lower().split()
         
-        k1 = 1.5
-        b = 0.75
+        if not query_tokens or not doc_tokens:
+            return 0.0
         
-        score = 0.0
-        for term in query_terms:
-            if term in doc_counter:
-                tf = doc_counter[term]
-                idf = 1.0  # Simplified, would need corpus statistics
-                
-                numerator = tf * (k1 + 1)
-                denominator = tf + k1 * (1 - b + b * (doc_length / avg_doc_length))
-                
-                score += idf * (numerator / denominator)
+        # Create BM25 index with single document
+        # This gives us proper IDF calculation even with one document
+        bm25 = BM25Okapi([doc_tokens])
         
-        return score / len(query_terms) if query_terms else 0.0
+        # Get BM25 score
+        score = bm25.get_scores(query_tokens)[0]
+        
+        # Normalize score to [0, 1] range
+        # BM25 scores can be negative, so we use sigmoid normalization
+        # This preserves the relative ordering while mapping to [0, 1]
+        import math
+        normalized_score = 1 / (1 + math.exp(-score))
+        
+        return normalized_score
     
     def _calculate_hybrid_score(
         self,
@@ -335,8 +334,19 @@ class MultiClassSemanticSearch:
             props = result.properties
             metadata = result.metadata
             
-            # Normalize semantic score
-            semantic_score = 1 - metadata.distance if metadata.distance else 0.0
+            # Normalize semantic score with robust distance handling
+            if metadata.distance is not None:
+                # For cosine distance with normalized embeddings, distance should be in [0, 2]
+                # For cosine similarity, we want to convert distance to similarity
+                # If distance is already similarity (negative), use as-is
+                if metadata.distance < 0:
+                    semantic_score = max(0.0, metadata.distance)
+                else:
+                    # Convert distance to similarity: similarity = 1 - distance
+                    # But ensure we handle edge cases where distance > 1
+                    semantic_score = max(0.0, min(1.0, 1.0 - metadata.distance))
+            else:
+                semantic_score = 0.0
             
             search_result = SearchResult(
                 doc_id=props.get('docId', 'unknown'),
