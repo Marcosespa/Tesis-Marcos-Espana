@@ -1,0 +1,21 @@
+# Requisitos para el evaluador de Cybersecurity QA
+# Instalar con: pip install -r requirements_evaluator.txt
+
+# Descarga de datasets de Kaggle
+kagglehub>=0.2.0
+
+# Manipulación de datos
+pandas>=1.5.0
+openpyxl>=3.0.0
+
+# Sistema RAG (ya instalado en el proyecto principal)
+crewai>=0.28.0
+crewai-tools>=0.1.0
+weaviate-client>=3.25.0
+
+# LLM providers
+langchain-ollama>=0.1.0
+langchain-openai>=0.1.0
+
+# Utilidades
+pathlib2>=2.3.0

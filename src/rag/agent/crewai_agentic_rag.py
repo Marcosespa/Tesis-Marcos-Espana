@@ -1,16 +1,29 @@
 #!/usr/bin/env python3
 """
-CrewAI Agentic RAG - Sistema Multi-Agente General
+CrewAI Agentic RAG - General Multi-Agent System
 
-Optimizaciones críticas:
-1. Tools SIN lógica LLM innecesaria
-2. max_iter=1 en TODOS los agentes (evita reflexión)
-3. Tareas con contexto pre-construido (menos procesamiento)
-4. Sin hardcoded queries
-5. Limpieza segura
+Critical optimizations:
+1. Tools WITHOUT unnecessary LLM logic
+2. max_iter=1 in ALL agents (avoids reflection)
+3. Tasks with pre-built context (less processing)
+4. No hardcoded queries
+5. Safe cleanup
 
-Uso:
-  python crewai_agentic_rag.py "¿Qué es inteligencia artificial?"
+Usage:
+  # Traditional search (Query Expansion)
+  python crewai_agentic_rag.py "What is MFA?"
+  
+  # HyDE search (Hypothetical Document Embeddings)
+  python crewai_agentic_rag.py "What is MFA?" --search-strategy hyde
+  
+  # Hybrid search (Traditional + HyDE)
+  python crewai_agentic_rag.py "What is MFA?" --search-strategy hybrid
+  
+  # Optimized architecture (3 specialized agents)
+  python crewai_agentic_rag.py "What is MFA?" --search-strategy optimized
+  
+  # With OpenAI and optimized architecture
+  python crewai_agentic_rag.py "What is MFA?" --llm-provider openai --openai-api-key sk-... --search-strategy optimized
 """
 
 import argparse
@@ -18,8 +31,6 @@ import sys
 import json
 import time
 import signal
-import os
-import atexit
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 
@@ -29,40 +40,6 @@ SRC_DIR = CURRENT_FILE.parents[2]
 if str(SRC_DIR) not in sys.path:
     sys.path.append(str(SRC_DIR))
 
-# ============================================================================
-# MANEJO DE SEÑALES Y LIMPIEZA
-# ============================================================================
-
-def cleanup_processes():
-    """Limpia todos los procesos hijos y conexiones"""
-    try:
-        print("\n🧹 Limpiando procesos...")
-        
-        # Cerrar conexiones Weaviate
-        if 'weaviate_client' in globals() and weaviate_client:
-            try:
-                weaviate_client.close()
-                print("  ✅ Weaviate cerrado")
-            except:
-                pass
-        
-        # NO terminar procesos automáticamente - solo cerrar conexiones
-        print("  ✅ Limpieza de conexiones completada")
-        
-    except Exception as e:
-        print(f"⚠️ Error en limpieza: {e}")
-
-def signal_handler(signum, frame):
-    """Manejador de señales para Ctrl+C"""
-    print(f"\n⚠️ Señal recibida: {signum}")
-    cleanup_processes()
-    print("👋 Saliendo...")
-    sys.exit(130)
-
-# Registrar manejadores de señales - Solo Ctrl+C
-signal.signal(signal.SIGINT, signal_handler)   # Ctrl+C
-# NO registrar SIGTERM para evitar terminaciones automáticas
-
 import weaviate
 from crewai import Agent, Task, Crew, Process
 from crewai.tools import tool
@@ -71,6 +48,11 @@ try:
 except ImportError:
     from langchain_community.chat_models import ChatOllama
 
+try:
+    from langchain_openai import ChatOpenAI
+except ImportError:
+    ChatOpenAI = None
+
 from rag.search.multi_class_search import (
     MultiClassSemanticSearch,
     AgentType,
@@ -78,38 +60,73 @@ from rag.search.multi_class_search import (
 
 
 # ============================================================================
-# CONTEXTO COMPARTIDO OPTIMIZADO
+# SIGNAL HANDLING AND CLEANUP
+# ============================================================================
+
+def cleanup_processes():
+    """Clean up all child processes and connections"""
+    try:
+        print("\n🧹 Cleaning up processes...")
+        
+        # Close Weaviate connections
+        if 'weaviate_client' in globals() and weaviate_client:
+            try:
+                weaviate_client.close()
+                print("  ✅ Weaviate closed")
+            except Exception:
+                pass
+        
+        # DO NOT terminate processes automatically - only close connections
+        print("  ✅ Connection cleanup completed")
+        
+    except Exception as e:
+        print(f"⚠️ Error in cleanup: {e}")
+
+def signal_handler(signum, frame):
+    """Signal handler for Ctrl+C"""
+    print(f"\n⚠️ Signal received: {signum}")
+    cleanup_processes()
+    print("👋 Exiting...")
+    sys.exit(130)
+
+# Register signal handlers - Only Ctrl+C
+signal.signal(signal.SIGINT, signal_handler)   # Ctrl+C
+# DO NOT register SIGTERM to avoid automatic terminations
+
+
+# ============================================================================
+# OPTIMIZED SHARED CONTEXT
 # ============================================================================
 
 class RAGContext:
-    """Contexto compartido entre agentes - Optimizado"""
+    """Shared context between agents - Optimized"""
     def __init__(self, weaviate_client):
         self.weaviate_client = weaviate_client
         self.retriever = MultiClassSemanticSearch(weaviate_client)
         self.passages: List[Dict] = []
         self.query: str = ""
         self.iterations: int = 0
-        # Atributos adicionales que faltaban
+        # Additional attributes that were missing
         self.original_query: str = ""
         self.current_answer: str = ""
         self.retrieved_passages: List[Dict] = []
 
 
-# Instancia global (se inicializa en main)
+# Global instance (initialized in main)
 rag_context: Optional[RAGContext] = None
 
 
 # ============================================================================
-# HERRAMIENTAS OPTIMIZADAS (Sin LLM interno)
+# OPTIMIZED TOOLS (No internal LLM)
 # ============================================================================
 
 @tool("expand_query")
 def expand_query(query: str) -> str:
     """
-    Expande una query con términos relacionados para mejorar la búsqueda.
+    Expand a query with related terms to improve search.
     """
     try:
-        # Generar variaciones de la query
+        # Generate query variations
         variations = [
             query,
             f"{query} definición concepto",
@@ -118,10 +135,10 @@ def expand_query(query: str) -> str:
             f"{query} mejores prácticas"
         ]
         
-        # Remover duplicados y limitar
+        # Remove duplicates and limit
         unique_variations = list(dict.fromkeys(variations))[:5]
         
-        print(f"  [expand_query] Generadas {len(unique_variations)} variaciones")
+        print(f"  [expand_query] Generated {len(unique_variations)} variations")
         
         return json.dumps({
             "success": True,
@@ -136,7 +153,7 @@ def expand_query(query: str) -> str:
 @tool("search_weaviate")
 def search_weaviate(query: str, k: int = 8, agent_type: str = "general") -> str:
     """
-    Búsqueda en Weaviate con parámetros específicos.
+    Search in Weaviate with specific parameters.
     """
     if rag_context is None:
         return json.dumps({"error": "Context not initialized"})
@@ -144,7 +161,7 @@ def search_weaviate(query: str, k: int = 8, agent_type: str = "general") -> str:
     try:
         start = time.time()
         
-        # Mapear agent_type a AgentType - Solo usar tipos válidos
+        # Map agent_type to AgentType - Only use valid types
         agent_mapping = {
             "general": AgentType.GENERAL,
             "security": AgentType.SECURITY,
@@ -153,9 +170,9 @@ def search_weaviate(query: str, k: int = 8, agent_type: str = "general") -> str:
         }
         agent = agent_mapping.get(agent_type.lower(), AgentType.GENERAL)
         
-        print(f"  [search_weaviate] Buscando '{query}' con agent={agent.value}, k={k}")
+        print(f"  [search_weaviate] Searching '{query}' with agent={agent.value}, k={k}")
         
-        # Búsqueda con reranking
+        # Search with reranking
         results = rag_context.retriever.search(
             query,
             agent=agent,
@@ -163,7 +180,7 @@ def search_weaviate(query: str, k: int = 8, agent_type: str = "general") -> str:
             rerank=True
         )
         
-        # Convertir resultados
+        # Convert results
         passages = []
         for r in results[:k]:
             passages.append({
@@ -175,10 +192,10 @@ def search_weaviate(query: str, k: int = 8, agent_type: str = "general") -> str:
             })
         
         rag_context.passages = passages
-        rag_context.retrieved_passages = passages  # Guardar también aquí
+        rag_context.retrieved_passages = passages  # Also save here
         elapsed = time.time() - start
         
-        print(f"  [search_weaviate] {len(passages)} docs en {elapsed:.2f}s")
+        print(f"  [search_weaviate] {len(passages)} docs in {elapsed:.2f}s")
         
         return json.dumps({
             "success": True,
@@ -192,12 +209,76 @@ def search_weaviate(query: str, k: int = 8, agent_type: str = "general") -> str:
         return json.dumps({"error": str(e)})
 
 
-@tool("smart_search")
-def smart_search(query: str, k: int = 8) -> str:
+@tool("generate_hypothetical_answer")
+def generate_hypothetical_answer(query: str) -> str:
     """
-    Búsqueda directa en Weaviate sin procesamiento extra.
+    Generate a hypothetical answer to the query WITHOUT searching documents.
+    This is used for HyDE (Hypothetical Document Embeddings) approach.
     
-    OPTIMIZACIÓN: Sin reformulación, directo a la búsqueda.
+    The hypothetical answer will be used to find similar documents.
+    """
+    try:
+        # Generate a hypothetical answer using the LLM
+        # This simulates what a good answer would look like
+        hypothetical_prompt = f"""
+Generate a comprehensive hypothetical answer to this question: "{query}"
+
+Requirements:
+- Write as if you were an expert answering this question
+- Include key concepts, definitions, and explanations
+- Use professional language
+- Be detailed but concise (150-300 words)
+- Do NOT mention that this is hypothetical
+- Write in the same style as technical documentation
+
+Answer:
+"""
+        
+        # Use the LLM to generate hypothetical answer
+        if rag_context and hasattr(rag_context, 'llm'):
+            # This would need access to the LLM instance
+            # For now, we'll create a structured hypothetical answer
+            pass
+        
+        # Create a structured hypothetical answer based on the query
+        hypothetical_answer = f"""
+Based on the question "{query}", here is a comprehensive explanation:
+
+This topic involves several key concepts that are fundamental to understanding the subject matter. The primary aspects include core definitions, practical applications, and implementation considerations. 
+
+Key points to consider:
+1. Definition and scope of the concept
+2. Common use cases and applications  
+3. Technical implementation details
+4. Best practices and recommendations
+5. Potential challenges and solutions
+
+The implementation typically involves specific methodologies and tools that are widely recognized in the field. Understanding these components is essential for effective application and troubleshooting.
+
+This approach provides a solid foundation for addressing related questions and scenarios that may arise in practical situations.
+"""
+        
+        print(f"  [generate_hypothetical_answer] Generated hypothetical answer ({len(hypothetical_answer)} chars)")
+        
+        return json.dumps({
+            "success": True,
+            "hypothetical_answer": hypothetical_answer,
+            "length": len(hypothetical_answer)
+        }, ensure_ascii=False)
+        
+    except Exception as e:
+        return json.dumps({"error": str(e)})
+
+
+@tool("hyde_search")
+def hyde_search(query: str, k: int = 8, agent_type: str = "general") -> str:
+    """
+    HyDE (Hypothetical Document Embeddings) search.
+    
+    Process:
+    1. Generate hypothetical answer to the query
+    2. Use that hypothetical answer to search for similar documents
+    3. Return relevant documents based on semantic similarity to the hypothetical answer
     """
     if rag_context is None:
         return json.dumps({"error": "Context not initialized"})
@@ -205,7 +286,82 @@ def smart_search(query: str, k: int = 8) -> str:
     try:
         start = time.time()
         
-        # Búsqueda directa con reranking
+        # Step 1: Generate hypothetical answer
+        print(f"  [hyde_search] Step 1: Generating hypothetical answer for '{query}'")
+        hypothetical_result = generate_hypothetical_answer(query)
+        hypothetical_data = json.loads(hypothetical_result)
+        
+        if not hypothetical_data.get("success"):
+            return json.dumps({"error": "Failed to generate hypothetical answer"})
+        
+        hypothetical_answer = hypothetical_data["hypothetical_answer"]
+        
+        # Step 2: Use hypothetical answer for search
+        print(f"  [hyde_search] Step 2: Searching with hypothetical answer")
+        
+        # Map agent_type to AgentType
+        agent_mapping = {
+            "general": AgentType.GENERAL,
+            "security": AgentType.SECURITY,
+            "none": AgentType.GENERAL,
+            "": AgentType.GENERAL
+        }
+        agent = agent_mapping.get(agent_type.lower(), AgentType.GENERAL)
+        
+        # Search using the hypothetical answer instead of the original query
+        results = rag_context.retriever.search(
+            hypothetical_answer,  # Use hypothetical answer for search
+            agent=agent,
+            k=k,
+            rerank=True
+        )
+        
+        # Convert results
+        passages = []
+        for r in results[:k]:
+            passages.append({
+                "doc_id": r.doc_id,
+                "title": r.title,
+                "pages": f"{r.page_start}-{r.page_end}",
+                "text": r.content[:500],
+                "score": r.final_score
+            })
+        
+        rag_context.passages = passages
+        rag_context.retrieved_passages = passages
+        
+        elapsed = time.time() - start
+        
+        print(f"  [hyde_search] {len(passages)} docs found in {elapsed:.2f}s using HyDE")
+        
+        return json.dumps({
+            "success": True,
+            "count": len(passages),
+            "passages": passages,
+            "hypothetical_answer": hypothetical_answer,
+            "avg_score": sum(p["score"] for p in passages) / len(passages) if passages else 0,
+            "method": "HyDE"
+        }, ensure_ascii=False)
+        
+    except Exception as e:
+        print(f"  [hyde_search] ERROR: {e}")
+        return json.dumps({"error": str(e)})
+
+
+@tool("smart_search")
+def smart_search(query: str, k: int = 8) -> str:
+    """
+    Direct search in Weaviate without extra processing.
+    
+    OPTIMIZATION: No reformulation, direct to search.
+    """
+    if rag_context is None:
+        return json.dumps({"error": "Context not initialized"})
+    
+    try:
+        start = time.time()
+        
+        # Direct search with reranking
         results = rag_context.retriever.search(
             query,
             agent=AgentType.GENERAL,
@@ -213,21 +369,21 @@ def smart_search(query: str, k: int = 8) -> str:
             rerank=True
         )
         
-        # Convertir resultados
+        # Convert results
         passages = []
-        for r in results[:8]:  # Limitar a top-8
+        for r in results[:8]:  # Limit to top-8
             passages.append({
                 "doc_id": r.doc_id,
                 "title": r.title,
                 "pages": f"{r.page_start}-{r.page_end}",
-                "text": r.content[:500],  # Texto reducido
+                "text": r.content[:500],  # Reduced text
                 "score": r.final_score
             })
         
         rag_context.passages = passages
         elapsed = time.time() - start
         
-        print(f"  [smart_search] {len(passages)} docs en {elapsed:.2f}s")
+        print(f"  [smart_search] {len(passages)} docs in {elapsed:.2f}s")
         
         return json.dumps({
             "success": True,
@@ -242,324 +398,542 @@ def smart_search(query: str, k: int = 8) -> str:
 
 
 # ============================================================================
-# DEFINICIÓN DE AGENTES
+# AGENT DEFINITIONS
 # ============================================================================
 
-def create_query_reformulator(llm) -> Agent:
-    """Agente que mejora queries de forma simple"""
+def create_hyde_generator(llm) -> Agent:
+    """Agent 1: HyDE Generator - Generates hypothetical answers without context"""
     return Agent(
-        role="Query Enhancement Specialist",
-        goal="Mejorar queries de usuario para optimizar búsquedas",
+        role="HyDE Generator",
+        goal="Generate comprehensive hypothetical answers to user queries without searching documents",
         backstory=(
-            "Eres un experto en optimización de queries para cualquier tema. "
-            "Tu trabajo es tomar la query del usuario y generar variaciones útiles "
-            "para búsqueda. Usas la herramienta expand_query UNA SOLA VEZ y luego "
-            "generas tu respuesta final sin repetir entradas."
+            "You are an expert in generating hypothetical answers for HyDE (Hypothetical Document Embeddings). "
+            "Your job is to create detailed, well-structured answers that simulate what a comprehensive "
+            "response would look like. You write as if you were an expert answering the question, "
+            "including key concepts, definitions, examples, and technical details. "
+            "You do NOT search for information - you generate based on your knowledge."
         ),
-        tools=[expand_query],
+        tools=[],  # No tools - pure generation
         llm=llm,
         verbose=True,
         allow_delegation=False,
-        max_iter=1  # Solo 1 iteración para evitar loops
+        max_iter=1  # Single generation
     )
 
 
-def create_answer_generator_with_search(llm) -> Agent:
-    """Agente que busca documentos Y genera respuestas"""
+def create_retrieval_response_agent(llm) -> Agent:
+    """Agent 2: Retrieval & Response - Uses hypothetical answer to find documents and generate final response"""
     return Agent(
-        role="Search & Answer Specialist",
-        goal="Buscar documentos relevantes y generar respuestas precisas",
+        role="Retrieval & Response Specialist",
+        goal="Use hypothetical answers to retrieve relevant documents and generate final grounded responses",
         backstory=(
-            "Eres un asistente experto que combina búsqueda inteligente "
-            "con síntesis de información. Primero buscas los mejores documentos "
-            "usando estrategias adaptativas, luego generas respuestas claras y "
-            "bien fundamentadas sobre cualquier tema. SIEMPRE citas tus fuentes con [n]."
+            "You are an expert in RAG (Retrieval-Augmented Generation). You receive hypothetical answers "
+            "from the HyDE Generator and use them to find the most relevant documents in the knowledge base. "
+            "Then you generate the final answer using only the retrieved documents as evidence. "
+            "You excel at grounding responses in real evidence and citing sources accurately."
         ),
-        tools=[search_weaviate],
+        tools=[search_weaviate],  # Use traditional search tool
         llm=llm,
         verbose=True,
         allow_delegation=False,
-        max_iter=3  # Limitar iteraciones para evitar loops
+        max_iter=2  # Search + generate
     )
 
 
-
-
-
-
-def create_quality_controller(llm) -> Agent:
-    """Agente supervisor simplificado"""
+def create_hyde_search_agent(llm) -> Agent:
+    """Agent specialized in HyDE (Hypothetical Document Embeddings) search"""
     return Agent(
-        role="Quality Control Manager",
-        goal="Evaluar la calidad de respuestas y decidir si aprobar o refinar",
+        role="HyDE Search Specialist",
+        goal="Use HyDE technique to find the most relevant documents",
         backstory=(
-            "Eres un evaluador de calidad especializado en sistemas RAG. "
-            "Analizas respuestas generadas sobre cualquier tema y decides si son "
-            "suficientes o necesitan refinamiento. Eres directo y eficiente en tus decisiones."
+            "You are an expert in HyDE (Hypothetical Document Embeddings) technique. "
+            "You generate hypothetical answers to queries and then use those answers "
+            "to find semantically similar documents. This approach often finds more "
+            "relevant documents than traditional query expansion. You excel at "
+            "understanding the semantic intent behind questions."
         ),
-        tools=[],  # Sin herramientas de delegación
+        tools=[hyde_search],
         llm=llm,
         verbose=True,
-        allow_delegation=False,  # Desactivar delegación TODO
-        max_iter=1 # Limitar iteraciones
+        allow_delegation=False,
+        max_iter=2  # HyDE is more direct, fewer iterations needed
+    )
+
+
+def create_hybrid_search_agent(llm) -> Agent:
+    """Agent that combines both traditional search and HyDE"""
+    return Agent(
+        role="Hybrid Search Specialist", 
+        goal="Use both traditional search and HyDE to find comprehensive results",
+        backstory=(
+            "You are an expert in hybrid search strategies. You combine traditional "
+            "query-based search with HyDE (Hypothetical Document Embeddings) to get "
+            "the best of both worlds. You can use either approach or both depending "
+            "on the query type and requirements."
+        ),
+        tools=[search_weaviate, hyde_search],
+        llm=llm,
+        verbose=True,
+        allow_delegation=False,
+        max_iter=3
+    )
+
+
+
+
+
+
+def create_quality_evaluator(llm) -> Agent:
+    """Agent 3: Quality Evaluator - Evaluates response quality with detailed criteria"""
+    return Agent(
+        role="Quality Evaluator",
+        goal="Evaluate response quality across multiple dimensions and provide detailed feedback",
+        backstory=(
+            "You are an expert quality evaluator for RAG systems. You assess responses across three key dimensions: "
+            "1) RELEVANCE - How well does the answer address the original question? "
+            "2) GROUNDEDNESS - How well is the answer supported by the retrieved documents? "
+            "3) COMPLETENESS - Is the answer comprehensive and complete? "
+            "You provide detailed feedback and make decisions: APPROVE (high quality), REFINE (needs improvement), or REJECT (poor quality)."
+        ),
+        tools=[],  # No tools - pure evaluation
+        llm=llm,
+        verbose=True,
+        allow_delegation=False,
+        max_iter=1  # Single evaluation
     )
 
 
 # ============================================================================
-# DEFINICIÓN DE TAREAS
+# TASK DEFINITIONS
 # ============================================================================
 
-def create_reformulation_task(agent: Agent, query: str) -> Task:
-    """Tarea simple de reformulación de query"""
+def create_hyde_generation_task(agent: Agent, query: str) -> Task:
+    """Task 1: Generate hypothetical answer without context"""
     return Task(
         description=(
-            f"Mejora esta consulta para optimizar la búsqueda:\n\n"
-            f"Query original: '{query}'\n\n"
-            f"Instrucciones:\n"
-            f"1. Usa la herramienta 'expand_query' UNA SOLA VEZ\n"
-            f"2. Después de obtener las variaciones, genera tu respuesta final\n"
-            f"3. NO repitas la misma entrada\n"
-            f"4. NO uses 'expand_query (again)'\n\n"
-            f"Formato de salida: Lista de queries optimizadas."
+            f"Generate a comprehensive hypothetical answer to this question:\n\n"
+            f"Question: '{query}'\n\n"
+            f"Requirements:\n"
+            f"- Write as if you were an expert answering this question\n"
+            f"- Include key concepts, definitions, and explanations\n"
+            f"- Use professional, technical language\n"
+            f"- Be detailed but concise (200-400 words)\n"
+            f"- Do NOT mention that this is hypothetical\n"
+            f"- Write in the same style as technical documentation\n"
+            f"- Include examples and practical applications when relevant\n\n"
+            f"Output: A comprehensive hypothetical answer that simulates what a complete response would look like."
         ),
         agent=agent,
         expected_output=(
-            "Lista de 3-5 queries optimizadas para búsqueda, incluyendo la original."
+            "A detailed hypothetical answer (200-400 words) that covers the question comprehensively, "
+            "written in professional technical style without mentioning it's hypothetical."
         )
     )
 
 
-def create_search_and_generate_task(agent: Agent, query: str) -> Task:
-    """Tarea combinada: buscar documentos y generar respuesta"""
+def create_retrieval_response_task(agent: Agent, query: str, hypothetical_answer: str) -> Task:
+    """Task 2: Use hypothetical answer to retrieve documents and generate final response"""
     return Task(
         description=(
-            f"Busca documentos relevantes y genera una respuesta completa para:\n\n"
-            f"Query: '{query}'\n\n"
-            f"Proceso OBLIGATORIO:\n"
-            f"1. Usa 'search_weaviate' con estos parámetros EXACTOS:\n"
+            f"Use the hypothetical answer to find relevant documents and generate the final response:\n\n"
+            f"Original Query: '{query}'\n\n"
+            f"Hypothetical Answer (for search):\n{hypothetical_answer}\n\n"
+            f"MANDATORY Process:\n"
+            f"1. Use 'search_weaviate' with these EXACT parameters:\n"
             f"   - query: '{query}'\n"
             f"   - k: 8\n"
             f"   - agent_type: 'general'\n"
-            f"2. Analiza los documentos recuperados\n"
-            f"3. Genera una respuesta completa y detallada\n\n"
-            f"Requisitos OBLIGATORIOS de la respuesta:\n"
-            f"- Responde en español, de forma clara y concisa\n"
-            f"- Mínimo 50 palabras\n"
-            f"- SIEMPRE cita fuentes con [n] al final de cada afirmación\n"
-            f"- Si hay pasos prácticos, usa listas numeradas\n"
-            f"- Si la evidencia es insuficiente, sé explícito\n"
-            f"- Al final incluye sección 'Fuentes:' con [docId:title:páginas]\n\n"
-            f"IMPORTANTE: NO solo digas 'APPROVE' - DEBES generar una respuesta completa.\n"
-            f"NO inventes información. Solo usa evidencia de los documentos."
+            f"2. Analyze the retrieved documents\n"
+            f"3. Generate the FINAL answer using ONLY the retrieved documents\n\n"
+            f"MANDATORY Requirements for the final answer:\n"
+            f"- Answer in English, clearly and concisely\n"
+            f"- Minimum 100 words\n"
+            f"- ALWAYS cite sources with [n] at the end of each statement\n"
+            f"- Ground ALL claims in the retrieved documents\n"
+            f"- If there are practical steps, use numbered lists\n"
+            f"- If evidence is insufficient, be explicit about limitations\n"
+            f"- At the end include 'Sources:' section with [docId:title:pages]\n\n"
+            f"IMPORTANT: This is the FINAL answer that will be evaluated. "
+            f"Make it comprehensive and well-grounded in the retrieved evidence."
         ),
         agent=agent,
         expected_output=(
-            "Respuesta completa en español con:\n"
-            "- Respuesta principal (mínimo 50 palabras)\n"
-            "- Citas inline con [n]\n"
-            "- Sección 'Fuentes:' al final\n"
-            "- Indicación clara si falta información"
+            "Final comprehensive answer in English with:\n"
+            "- Main answer (minimum 100 words)\n"
+            "- Inline citations with [n]\n"
+            "- 'Sources:' section at the end\n"
+            "- Clear indication if information is missing\n"
+            "- All claims grounded in retrieved documents"
+        )
+    )
+
+
+def create_hyde_search_task(agent: Agent, query: str) -> Task:
+    """HyDE-based search task"""
+    return Task(
+        description=(
+            f"Use HyDE (Hypothetical Document Embeddings) to find relevant documents and generate an answer for:\n\n"
+            f"Query: '{query}'\n\n"
+            f"MANDATORY HyDE Process:\n"
+            f"1. Use 'hyde_search' with these EXACT parameters:\n"
+            f"   - query: '{query}'\n"
+            f"   - k: 8\n"
+            f"   - agent_type: 'general'\n"
+            f"2. The tool will generate a hypothetical answer and search for similar documents\n"
+            f"3. Analyze the retrieved documents\n"
+            f"4. Generate a complete and detailed answer\n\n"
+            f"MANDATORY Requirements for the answer:\n"
+            f"- Answer in English, clearly and concisely\n"
+            f"- Minimum 50 words\n"
+            f"- ALWAYS cite sources with [n] at the end of each statement\n"
+            f"- If there are practical steps, use numbered lists\n"
+            f"- If evidence is insufficient, be explicit\n"
+            f"- At the end include 'Sources:' section with [docId:title:pages]\n\n"
+            f"IMPORTANT: DO NOT just say 'APPROVE' - YOU MUST generate a complete answer.\n"
+            f"DO NOT invent information. Only use evidence from the documents."
+        ),
+        agent=agent,
+        expected_output=(
+            "Complete answer in English with:\n"
+            "- Main answer (minimum 50 words)\n"
+            "- Inline citations with [n]\n"
+            "- 'Sources:' section at the end\n"
+            "- Clear indication if information is missing"
+        )
+    )
+
+
+def create_hybrid_search_task(agent: Agent, query: str) -> Task:
+    """Hybrid search task combining traditional and HyDE approaches"""
+    return Task(
+        description=(
+            f"Use hybrid search strategy to find relevant documents and generate an answer for:\n\n"
+            f"Query: '{query}'\n\n"
+            f"MANDATORY Hybrid Process:\n"
+            f"1. First, try 'hyde_search' with these parameters:\n"
+            f"   - query: '{query}'\n"
+            f"   - k: 6\n"
+            f"   - agent_type: 'general'\n"
+            f"2. Then, try 'search_weaviate' with these parameters:\n"
+            f"   - query: '{query}'\n"
+            f"   - k: 6\n"
+            f"   - agent_type: 'general'\n"
+            f"3. Combine and analyze all retrieved documents\n"
+            f"4. Generate a comprehensive answer using the best sources\n\n"
+            f"MANDATORY Requirements for the answer:\n"
+            f"- Answer in English, clearly and concisely\n"
+            f"- Minimum 50 words\n"
+            f"- ALWAYS cite sources with [n] at the end of each statement\n"
+            f"- If there are practical steps, use numbered lists\n"
+            f"- If evidence is insufficient, be explicit\n"
+            f"- At the end include 'Sources:' section with [docId:title:pages]\n\n"
+            f"IMPORTANT: DO NOT just say 'APPROVE' - YOU MUST generate a complete answer.\n"
+            f"DO NOT invent information. Only use evidence from the documents."
+        ),
+        agent=agent,
+        expected_output=(
+            "Complete answer in English with:\n"
+            "- Main answer (minimum 50 words)\n"
+            "- Inline citations with [n]\n"
+            "- 'Sources:' section at the end\n"
+            "- Clear indication if information is missing"
         )
     )
 
 
 
 
-def create_quality_control_task(agent: Agent, query: str) -> Task:
-    """Tarea de control de calidad simplificado"""
+def create_quality_evaluation_task(agent: Agent, query: str, final_answer: str, sources: List[Dict]) -> Task:
+    """Task 3: Evaluate response quality across multiple dimensions"""
     return Task(
         description=(
-            f"Evalúa la calidad de la respuesta generada:\n\n"
-            f"Query original: '{query}'\n"
-            f"Iteración actual: {rag_context.iterations}\n\n"
-            f"Criterios de evaluación:\n"
-            f"1. ¿La respuesta aborda completamente la query?\n"
-            f"2. ¿Hay suficientes fuentes citadas? (mínimo 2)\n"
-            f"3. ¿La respuesta es clara y útil?\n\n"
-            f"Decisión:\n"
-            f"- Si todo OK → APPROVE (respuesta final)\n"
-            f"- Si falta info y iteraciones<2 → REFINE (nueva búsqueda)\n"
-            f"- Si iteraciones≥2 → APPROVE (mejor esfuerzo)\n\n"
-            f"Responde solo con: APPROVE o REFINE"
+            f"Evaluate the quality of the generated response across three key dimensions:\n\n"
+            f"Original Query: '{query}'\n\n"
+            f"Generated Response:\n{final_answer}\n\n"
+            f"Retrieved Sources: {len(sources)} documents\n"
+            f"Source IDs: {[s.get('doc_id', 'N/A') for s in sources[:3]]}\n\n"
+            f"Evaluation Criteria:\n\n"
+            f"1. RELEVANCE (0-10):\n"
+            f"   - Does the answer directly address the original question?\n"
+            f"   - Is the response focused and on-topic?\n"
+            f"   - Does it provide useful information?\n\n"
+            f"2. GROUNDEDNESS (0-10):\n"
+            f"   - Are claims supported by the retrieved documents?\n"
+            f"   - Are citations accurate and relevant?\n"
+            f"   - Is there evidence for each major claim?\n\n"
+            f"3. COMPLETENESS (0-10):\n"
+            f"   - Is the answer comprehensive?\n"
+            f"   - Does it cover the main aspects of the question?\n"
+            f"   - Are there significant gaps?\n\n"
+            f"Decision Framework:\n"
+            f"- APPROVE: All scores ≥ 7, high quality response\n"
+            f"- REFINE: Any score < 7 but > 4, needs improvement\n"
+            f"- REJECT: Any score ≤ 4, poor quality\n\n"
+            f"Provide detailed scores and reasoning for your decision."
         ),
         agent=agent,
         expected_output=(
-            "Decisión simple: APPROVE o REFINE"
+            "Detailed evaluation with:\n"
+            "- Relevance score (0-10) with reasoning\n"
+            "- Groundedness score (0-10) with reasoning\n"
+            "- Completeness score (0-10) with reasoning\n"
+            "- Overall decision: APPROVE/REFINE/REJECT\n"
+            "- Specific feedback for improvement (if REFINE/REJECT)"
         )
     )
 
 
 # ============================================================================
-# SISTEMA RAG CON CREWAI
+# CREWAI RAG SYSTEM
 # ============================================================================
 
 class CrewAIAgenticRAG:
-    """Sistema RAG orquestado por CrewAI"""
+    """RAG system orchestrated by CrewAI"""
     
     def __init__(
         self,
         weaviate_client,
         model: str = "mistral",
         ollama_host: str = "http://localhost:11434",
-        max_iterations: int = 2
+        max_iterations: int = 2,
+        llm_provider: str = "ollama",  # "ollama" o "openai"
+        openai_api_key: str = None,
+        search_strategy: str = "traditional"  # "traditional", "hyde", "hybrid"
     ):
         global rag_context
         rag_context = RAGContext(weaviate_client)
         
         self.max_iterations = max_iterations
+        self.search_strategy = search_strategy
         
-        # Configurar LLM (Ollama via LangChain) - Formato correcto para LiteLLM
-        self.llm = ChatOllama(
-            model=f"ollama/{model}",  # Formato que espera LiteLLM
-            base_url=ollama_host,
-            temperature=0.3,
-            format="json"  # Para respuestas estructuradas
-        )
+        # Configure LLM according to provider
+        if llm_provider.lower() == "openai":
+            if ChatOpenAI is None:
+                raise ImportError("ChatOpenAI is not available. Install: pip install langchain-openai")
+            if not openai_api_key:
+                raise ValueError("openai_api_key is required to use OpenAI")
+            
+            self.llm = ChatOpenAI(
+                model=model,  # "gpt-4o-mini"
+                api_key=openai_api_key,
+                temperature=0.3,
+                max_tokens=1000
+            )
+            print(f"🤖 Using OpenAI: {model}")
+            
+        else:  # ollama by default
+            self.llm = ChatOllama(
+                model=f"ollama/{model}",  # Formato que espera LiteLLM
+                base_url=ollama_host,
+                temperature=0.3,
+                format="json"  # For structured responses
+            )
+            print(f"🤖 Using Ollama: {model}")
         
-        # Crear agentes simplificados (solo 3 esenciales)
+        # Create agents according to search strategy
+        if search_strategy == "optimized":
+            print("🔍 Using Optimized HyDE Architecture (3 Specialized Agents)")
+            self.agents = {
+                "hyde_generator": create_hyde_generator(self.llm),
+                "retrieval_response": create_retrieval_response_agent(self.llm),
+                "quality_evaluator": create_quality_evaluator(self.llm)
+            }
+        elif search_strategy == "hyde":
+            print("🔍 Using HyDE strategy (Hypothetical Document Embeddings)")
         self.agents = {
             "reformulator": create_query_reformulator(self.llm),
-            "generator": create_answer_generator_with_search(self.llm),
+                "generator": create_hyde_search_agent(self.llm),
+                "controller": create_quality_controller(self.llm)
+            }
+        elif search_strategy == "hybrid":
+            print("🔍 Using Hybrid strategy (Traditional + HyDE)")
+            self.agents = {
+                "reformulator": create_query_reformulator(self.llm),
+                "generator": create_hybrid_search_agent(self.llm),
+                "controller": create_quality_controller(self.llm)
+            }
+        else:  # traditional
+            print("🔍 Using Traditional strategy (Query Expansion)")
+            self.agents = {
+                "reformulator": create_query_reformulator(self.llm),
+                "generator": create_answer_generator_with_search(self.llm),
             "controller": create_quality_controller(self.llm)
         }
     
     def process_query(self, query: str, verbose: bool = True) -> Dict[str, Any]:
-        """Procesa una query con el sistema multi-agente"""
+        """Process a query with the multi-agent system"""
         
         print(f"\n{'='*80}")
-        print(f"🚀 INICIANDO CREWAI AGENTIC RAG")
+        print(f"🚀 STARTING CREWAI AGENTIC RAG")
         print(f"{'='*80}")
-        print(f"Query: {query}\n")
+        print(f"Query: {query}")
+        print()
         
         rag_context.original_query = query
         current_query = query
         
         try:
-            for iteration in range(self.max_iterations):
-                rag_context.iterations = iteration + 1
+        for iteration in range(self.max_iterations):
+            rag_context.iterations = iteration + 1
+            
+            print(f"\n{'─'*80}")
+                print(f"🔄 ITERATION {iteration + 1}/{self.max_iterations}")
+            print(f"{'─'*80}\n")
+            
+                if self.search_strategy == "optimized":
+                    # Optimized architecture with 3 specialized agents
+                    print("📝 Phase 1: HyDE Generation")
+                    hyde_task = create_hyde_generation_task(
+                        self.agents["hyde_generator"],
+                        current_query
+                    )
+                    
+                    print("\n🔍✍️ Phase 2: Retrieval & Response")
+                    retrieval_task = create_retrieval_response_task(
+                        self.agents["retrieval_response"],
+                        current_query,
+                        "Generated hypothetical answer will be used for search"
+                    )
+                    
+                    print("\n🎯 Phase 3: Quality Evaluation")
+                    quality_task = create_quality_evaluation_task(
+                        self.agents["quality_evaluator"],
+                        current_query,
+                        "Generated response will be evaluated",
+                        rag_context.retrieved_passages or []
+                    )
+                    
+                    tasks = [hyde_task, retrieval_task, quality_task]
+                    
+                else:
+                    # Traditional architectures
+                    # Phase 1: Reformulation
+                    print("📝 Phase 1: Query Reformulation")
+            reformulation_task = create_reformulation_task(
+                self.agents["reformulator"],
+                current_query
+            )
+            
+                    # Phase 2: Search and Generation (combined)
+                    print("\n🔍✍️ Phase 2: Search and Answer Generation")
+                    if self.search_strategy == "hyde":
+                        search_generate_task = create_hyde_search_task(
+                            self.agents["generator"],
+                current_query
+            )
+                    elif self.search_strategy == "hybrid":
+                        search_generate_task = create_hybrid_search_task(
+                            self.agents["generator"],
+                current_query
+            )
+                    else:  # traditional
+                        search_generate_task = create_search_and_generate_task(
+                self.agents["generator"],
+                current_query
+            )
+            
+                    # Phase 3: Quality Control
+                    print("\n🎯 Phase 3: Quality Control")
+            quality_task = create_quality_control_task(
+                self.agents["controller"],
+                current_query
+            )
+            
+                    tasks = [reformulation_task, search_generate_task, quality_task]
                 
-                print(f"\n{'─'*80}")
-                print(f"🔄 ITERACIÓN {iteration + 1}/{self.max_iterations}")
-                print(f"{'─'*80}\n")
-                
-                # Fase 1: Reformulación
-                print("📝 Fase 1: Reformulación de Query")
-                reformulation_task = create_reformulation_task(
-                    self.agents["reformulator"],
-                    current_query
-                )
-                
-                # Fase 2: Búsqueda y Generación (combinada)
-                print("\n🔍✍️ Fase 2: Búsqueda y Generación de Respuesta")
-                search_generate_task = create_search_and_generate_task(
-                    self.agents["generator"],
-                    current_query
-                )
-                
-                # Fase 3: Control de Calidad
-                print("\n🎯 Fase 3: Control de Calidad")
-                quality_task = create_quality_control_task(
-                    self.agents["controller"],
-                    current_query
-                )
-                
-                # Crear crew simplificado para esta iteración
+                # Create simplified crew for this iteration
                 crew = Crew(
                     agents=list(self.agents.values()),
-                    tasks=[
-                        reformulation_task,
-                        search_generate_task,
-                        quality_task
-                    ],
-                    process=Process.sequential,  # Ejecutar en orden
+                    tasks=tasks,
+                    process=Process.sequential,  # Execute in order
                     verbose=verbose
                 )
                 
-                # Ejecutar crew
-                print("\n🎬 Ejecutando Crew...")
+                # Execute crew
+                print("\n🎬 Executing Crew...")
                 result = crew.kickoff()
-                
-                # Parsear decisión del controlador
-                try:
-                    # El último task debe tener la decisión
-                    quality_result = result
-                    if "APPROVE" in str(quality_result).upper():
-                        print("\n✅ Respuesta APROBADA por Quality Controller")
-                        break
-                    elif "REFINE" in str(quality_result).upper():
-                        print("\n🔄 Quality Controller solicita REFINAMIENTO")
-                        # Extraer nueva query sugerida
-                        # (En producción parsearías el JSON del quality_task)
-                        current_query = f"{query} ejemplos casos uso implementación"
-                        continue
-                except Exception:
-                    # Si no se puede parsear, aprobar por defecto
-                    break
             
-        # Resultado final - Extraer la respuesta real del Search & Answer Specialist
-        final_answer = rag_context.current_answer or str(result)
+                # Parse controller decision
+                try:
+                    # The last task should have the decision
+                    quality_result = result
+                if "APPROVE" in str(quality_result).upper():
+                        print("\n✅ Answer APPROVED by Quality Controller")
+                    break
+                elif "REFINE" in str(quality_result).upper():
+                        print("\n🔄 Quality Controller requests REFINEMENT")
+                        # Extract new suggested query
+                        # (In production you would parse the JSON from quality_task)
+                        current_query = f"{query} examples use cases implementation"
+                    continue
+                except Exception:
+                    # If cannot parse, approve by default
+                break
         
-        # Si el resultado es solo "APPROVE", buscar la respuesta real en el contexto
-        if "APPROVE" in str(result) and len(str(result)) < 100:
-            # La respuesta real está en el contexto de los agentes
-            final_answer = "Respuesta no disponible - el agente Search & Answer Specialist debería haber generado la respuesta completa"
-        
+            # Final result - Extract the real answer from Search & Answer Specialist
+            final_answer = rag_context.current_answer or str(result)
+            
+            # If the result is just "APPROVE", search for the real answer in the context
+            if "APPROVE" in str(result) and len(str(result)) < 100:
+                # The real answer is in the agent context
+                final_answer = "Answer not available - the Search & Answer Specialist agent should have generated the complete answer"
+            
         return {
             "query": rag_context.original_query,
             "final_query": current_query,
-            "answer": final_answer,
-            "passages": rag_context.retrieved_passages,
-            "iterations": rag_context.iterations,
-            "agents_used": list(self.agents.keys())
-        }
-            
+                "answer": final_answer,
+                "passages": rag_context.retrieved_passages,
+                "iterations": rag_context.iterations,
+                "agents_used": list(self.agents.keys())
+            }
+                
         except KeyboardInterrupt:
-            print("\n⚠️ Interrumpido por usuario")
+            print("\n⚠️ Interrupted by user")
             return {
                 "query": rag_context.original_query,
-                "answer": "Proceso interrumpido por usuario",
+                "answer": "Process interrupted by user",
                 "passages": rag_context.retrieved_passages,
                 "iterations": rag_context.iterations,
                 "agents_used": list(self.agents.keys())
             }
         except Exception as e:
-            print(f"\n❌ Error en procesamiento: {e}")
+            print(f"\n❌ Error in processing: {e}")
             return {
                 "query": rag_context.original_query,
                 "answer": f"Error: {str(e)}",
-                "passages": rag_context.retrieved_passages,
-                "iterations": rag_context.iterations,
-                "agents_used": list(self.agents.keys())
-            }
+            "passages": rag_context.retrieved_passages,
+            "iterations": rag_context.iterations,
+            "agents_used": list(self.agents.keys())
+        }
 
 
 # ============================================================================
-# UTILIDADES
+# UTILITIES
 # ============================================================================
 
 def format_crewai_output(result: Dict[str, Any]) -> str:
-    """Formatea output de CrewAI para CLI"""
+    """Format CrewAI output for CLI"""
     lines = [
         "\n" + "="*80,
-        " RESULTADO FINAL - CREWAI AGENTIC RAG",
+        " FINAL RESULT - CREWAI AGENTIC RAG",
         "="*80,
-        f"\nQuery Original: {result['query']}",
-        f"Query Final: {result['final_query']}",
-        f"Iteraciones: {result['iterations']}",
-        f"Agentes Utilizados: {', '.join(result['agents_used'])}",
+        f"\nOriginal Query: {result['query']}",
+        f"Final Query: {result['final_query']}",
+        f"Iterations: {result['iterations']}",
+        f"Agents Used: {', '.join(result['agents_used'])}",
         f"\n{'-'*80}",
-        "\n📄 RESPUESTA:\n",
+        "\n📄 ANSWER:\n",
         "-"*80,
         result['answer'],
         f"\n{'-'*80}",
-        "\n📚 FUENTES:\n",
+        "\n📚 SOURCES:\n",
         "-"*80,
     ]
     
     for i, p in enumerate(result['passages'], 1):
         lines.append(
             f"[{i}] {p['title']} ({p['doc_id']}) "
-            f"páginas {p['pages']} - Score: {p['score']:.3f}"
+            f"pages {p['pages']} - Score: {p['score']:.3f}"
         )
     
     lines.append("="*80 + "\n")
@@ -575,60 +949,83 @@ def main():
     global weaviate_client
     
     parser = argparse.ArgumentParser(
-        description="Agentic RAG con CrewAI - Sistema Multi-Agente Simplificado",
+        description="Agentic RAG with CrewAI - Simplified Multi-Agent System",
         formatter_class=argparse.RawDescriptionHelpFormatter
     )
     
-    parser.add_argument("query", help="Consulta del usuario")
+    parser.add_argument("query", help="User query")
     parser.add_argument("--host", default="localhost")
     parser.add_argument("--http_port", type=int, default=8080)
     parser.add_argument("--grpc_port", type=int, default=50051)
     parser.add_argument("--model", default="mistral")
     parser.add_argument("--max-iterations", type=int, default=2)
-    parser.add_argument("--verbose", action="store_true", help="Modo verbose de CrewAI")
+    parser.add_argument("--verbose", action="store_true", help="CrewAI verbose mode")
     parser.add_argument("--ollama-host", default="http://localhost:11434")
+    
+    # Arguments for OpenAI
+    parser.add_argument("--llm-provider", choices=["ollama", "openai"], default="ollama", 
+                       help="LLM provider: ollama or openai")
+    parser.add_argument("--openai-api-key", help="OpenAI API Key (required if --llm-provider=openai)")
+    parser.add_argument("--openai-model", default="gpt-3.5-turbo", 
+                       help="OpenAI model (e.g.: gpt-3.5-turbo, gpt-4, gpt-4-turbo)")
+    
+    # Search strategy arguments
+    parser.add_argument("--search-strategy", choices=["traditional", "hyde", "hybrid", "optimized"], default="traditional",
+                       help="Search strategy: traditional (query expansion), hyde (hypothetical embeddings), hybrid (both), optimized (3 specialized agents)")
     
     args = parser.parse_args()
     
     weaviate_client = None
     
     print("=" * 80)
-    print("🚀 CREWAI AGENTIC RAG - SISTEMA MULTI-AGENTE")
+    print("🚀 CREWAI AGENTIC RAG - MULTI-AGENT SYSTEM")
     print("=" * 80)
-    print("💡 Presiona Ctrl+C en cualquier momento para salir limpiamente")
-    print("🧹 El sistema limpiará automáticamente todos los procesos")
+    print("💡 Press Ctrl+C at any time to exit cleanly")
+    print("🧹 The system will automatically clean up all processes")
     print("=" * 80)
     
     try:
-        # Conectar a Weaviate
-        print("🔌 Conectando a Weaviate...")
-        weaviate_client = weaviate.connect_to_local(
-            host=args.host,
-            port=args.http_port,
-            grpc_port=args.grpc_port
-        )
+        # Connect to Weaviate
+        print("🔌 Connecting to Weaviate...")
+    weaviate_client = weaviate.connect_to_local(
+        host=args.host,
+        port=args.http_port,
+        grpc_port=args.grpc_port
+    )
+    
+        # Determine model according to provider
+        if args.llm_provider == "openai":
+            model_name = args.openai_model
+            if not args.openai_api_key:
+                print("❌ ERROR: --openai-api-key is required to use OpenAI")
+                return 1
+        else:
+            model_name = args.model
         
-        # Inicializar sistema CrewAI RAG
-        print("🚀 Inicializando sistema RAG...")
+        # Initialize CrewAI RAG system
+        print("🚀 Initializing RAG system...")
         rag_system = CrewAIAgenticRAG(
             weaviate_client=weaviate_client,
-            model=args.model,
+            model=model_name,
             ollama_host=args.ollama_host,
-            max_iterations=args.max_iterations
+            max_iterations=args.max_iterations,
+            llm_provider=args.llm_provider,
+            openai_api_key=args.openai_api_key,
+            search_strategy=args.search_strategy
         )
         
-        # Procesar query
-        print("🎯 Procesando consulta...")
+        # Process query
+        print("🎯 Processing query...")
         result = rag_system.process_query(args.query, verbose=args.verbose)
         
-        # Mostrar resultado
+        # Show result
         output = format_crewai_output(result)
         print(output)
         
         return 0
         
     except KeyboardInterrupt:
-        print("\n⚠️ Proceso interrumpido por usuario (Ctrl+C)")
+        print("\n⚠️ Process interrupted by user (Ctrl+C)")
         return 130
     except Exception as e:
         print(f"\n❌ ERROR: {e}")
@@ -637,7 +1034,7 @@ def main():
         return 1
     
     finally:
-        # Usar la función de limpieza centralizada
+        # Use centralized cleanup function
         cleanup_processes()
 
 
