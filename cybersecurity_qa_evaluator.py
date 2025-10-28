@@ -52,16 +52,21 @@ class CybersecurityQAEvaluator:
         llm_provider: str = "ollama",
         openai_api_key: str = None,
         openai_model: str = "gpt-3.5-turbo",
-        ollama_model: str = "mistral"
+        ollama_model: str = "mistral",
+        skip_quality_evaluation: bool = False  # Nueva opción
     ):
         self.weaviate_client = weaviate_client
         self.llm_provider = llm_provider
         self.openai_api_key = openai_api_key
         self.openai_model = openai_model
         self.ollama_model = ollama_model
+        self.skip_quality_evaluation = skip_quality_evaluation
         
         # Inicializar sistema RAG
         print("🚀 Inicializando sistema RAG...")
+        if skip_quality_evaluation:
+            print("⚡ Modo RÁPIDO: Quality Evaluator deshabilitado")
+        
         self.rag_system = OptimizedCrewAIRAG(
             weaviate_client=weaviate_client,
             model=openai_model if llm_provider == "openai" else ollama_model,
@@ -73,81 +78,70 @@ class CybersecurityQAEvaluator:
         self.results: List[Dict[str, Any]] = []
         
     def download_dataset(self) -> str:
-        """Descarga el dataset de Cybersecurity QA de Kaggle"""
-        print("📥 Descargando dataset de Cybersecurity QA...")
+        """Usa el dataset local de TopQuestions"""
+        print("📥 Usando dataset local de TopQuestions...")
         
         try:
-            # Descargar dataset
-            path = kagglehub.dataset_download("zobayer0x01/cybersecurity-qa")
-            print(f"✅ Dataset descargado en: {path}")
+            # Archivo local
+            csv_file = Path("/Users/marcosespana/Desktop/U/DatosTesis/data/Questions/TopQuestions(in).csv")
             
-            # Buscar archivos CSV en el directorio
-            dataset_path = Path(path)
-            csv_files = list(dataset_path.glob("*.csv"))
+            if not csv_file.exists():
+                # Intentar ruta relativa
+                csv_file = Path("data/Questions/TopQuestions(in).csv")
+                if not csv_file.exists():
+                    raise FileNotFoundError(f"No se encontró el archivo en ninguna ubicación")
             
-            if not csv_files:
-                print("⚠️  No se encontraron archivos CSV en el dataset")
-                return str(dataset_path)
+            print(f"✅ Dataset local encontrado: {csv_file}")
+            print(f"📊 Ubicación: {csv_file.absolute()}")
             
-            print(f"📄 Archivos encontrados: {[f.name for f in csv_files]}")
-            return str(dataset_path)
+            return str(csv_file.parent)
             
         except Exception as e:
-            print(f"❌ ERROR descargando dataset: {e}")
+            print(f"❌ ERROR accediendo al dataset: {e}")
             raise
     
     def load_questions(self, dataset_path: str, max_questions: int = 10) -> List[Dict[str, str]]:
-        """Carga preguntas del dataset"""
-        print(f"📖 Cargando preguntas del dataset (máximo {max_questions})...")
-        
-        dataset_dir = Path(dataset_path)
-        csv_files = list(dataset_dir.glob("*.csv"))
-        
-        if not csv_files:
-            raise FileNotFoundError("No se encontraron archivos CSV en el dataset")
-        
-        # Usar el primer archivo CSV encontrado
-        csv_file = csv_files[0]
-        print(f"📄 Leyendo archivo: {csv_file.name}")
+        """Carga preguntas del dataset TopQuestions, combinando Titulo + Cuerpo"""
+        print(f"📖 Cargando preguntas del dataset TopQuestions (máximo {max_questions})...")
         
         try:
-            df = pd.read_csv(csv_file)
+            # Leer el archivo CSV con separador semicolon
+            csv_file = Path("/Users/marcosespana/Desktop/U/DatosTesis/data/Questions/TopQuestions(in).csv")
+            if not csv_file.exists():
+                csv_file = Path("data/Questions/TopQuestions(in).csv")
+            
+            df = pd.read_csv(csv_file, sep=';')
+            
             print(f"📊 Dataset cargado: {len(df)} filas, {len(df.columns)} columnas")
             print(f"📋 Columnas: {list(df.columns)}")
             
-            # Buscar columnas que contengan preguntas
-            question_columns = [col for col in df.columns if 'question' in col.lower() or 'query' in col.lower()]
-            answer_columns = [col for col in df.columns if 'answer' in col.lower() or 'response' in col.lower()]
-            
-            print(f"❓ Columnas de preguntas encontradas: {question_columns}")
-            print(f"✅ Columnas de respuestas encontradas: {answer_columns}")
-            
             questions = []
             
-            # Si hay columnas específicas de pregunta y respuesta
-            if question_columns and answer_columns:
-                question_col = question_columns[0]
-                answer_col = answer_columns[0]
+            # Combinar Titulo + Cuerpo para cada pregunta
+            for idx, row in df.head(max_questions).iterrows():
+                titulo = str(row.get('Titulo', '')).strip() if pd.notna(row.get('Titulo')) else ''
+                cuerpo = str(row.get('Cuerpo', '')).strip() if pd.notna(row.get('Cuerpo')) else ''
                 
-                for idx, row in df.head(max_questions).iterrows():
-                    if pd.notna(row[question_col]) and pd.notna(row[answer_col]):
-                        questions.append({
-                            "question": str(row[question_col]).strip(),
-                            "expected_answer": str(row[answer_col]).strip(),
-                            "source": f"{csv_file.name}_row_{idx}"
-                        })
+                if titulo and cuerpo:
+                    # Combinar título + cuerpo como pregunta completa
+                    question_text = f"{titulo}\n\n{cuerpo}"
+                    
+                    # Respuesta esperada (si existe la columna 'Respuesta')
+                    expected_answer = str(row.get('Respuesta', '')).strip() if pd.notna(row.get('Respuesta')) else ''
+                    
+                    # Guardar todos los datos originales de la fila
+                    original_data = row.to_dict()
+                    
+                    questions.append({
+                        "question": question_text,
+                        "expected_answer": expected_answer,
+                        "source": f"TopQuestions_row_{idx}",
+                        "title": titulo,
+                        "body": cuerpo,
+                        "original_data": original_data  # Guardar todos los datos originales
+                    })
             
-            # Si no hay columnas específicas, usar la primera columna como pregunta
-            elif len(df.columns) >= 1:
-                for idx, row in df.head(max_questions).iterrows():
-                    if pd.notna(row.iloc[0]):
-                        questions.append({
-                            "question": str(row.iloc[0]).strip(),
-                            "expected_answer": "",
-                            "source": f"{csv_file.name}_row_{idx}"
-                        })
-            
-            print(f"✅ {len(questions)} preguntas cargadas")
+            print(f"✅ {len(questions)} preguntas cargadas (Titulo + Cuerpo combinados)")
             return questions
             
         except Exception as e:
@@ -165,7 +159,11 @@ class CybersecurityQAEvaluator:
         start_time = time.time()
         
         try:
-            # Hacer pregunta al RAG
+            # Obtener datos originales
+            original_data = question_data.get("original_data", {})
+            
+            # Hacer pregunta al RAG con verbose desactivado para mayor velocidad
+            # TODO: Agregar opción para desactivar quality evaluator cuando skip_quality_evaluation=True
             result = self.rag_system.process_query(question, verbose=False)
             
             end_time = time.time()
@@ -173,22 +171,23 @@ class CybersecurityQAEvaluator:
             
             # Extraer información del resultado
             rag_answer = result.get("answer", "Sin respuesta")
+            quality_evaluation = result.get("quality_evaluation", "Sin evaluación")
             passages = result.get("passages", [])
             iterations = result.get("iterations", 0)
             
-            # Crear resultado estructurado
+            # Crear resultado estructurado con TODA la información original
             evaluation_result = {
-                "timestamp": datetime.now().isoformat(),
-                "question": question,
-                "expected_answer": expected_answer,
-                "rag_answer": rag_answer,
-                "response_time_seconds": round(response_time, 2),
-                "iterations": iterations,
-                "num_sources": len(passages),
-                "sources": [f"{p.get('doc_id', 'N/A')}:{p.get('title', 'N/A')}" for p in passages[:5]],
-                "source_file": source,
-                "llm_provider": self.llm_provider,
-                "model": self.openai_model if self.llm_provider == "openai" else self.ollama_model
+                # Primero, incluir todas las columnas del CSV original
+                **original_data,
+                # Agregar columnas del sistema RAG
+                "RAG_Model": "Mistral7B",
+                "RAG_Response": rag_answer,  # Respuesta pura del modelo
+                "RAG_Quality_Evaluation": quality_evaluation,
+                "RAG_Response_Time_Seconds": round(response_time, 2),
+                "RAG_Iterations": iterations,
+                "RAG_Num_Sources": len(passages),
+                "RAG_Sources": [f"{p.get('doc_id', 'N/A')}" for p in passages],
+                "RAG_Timestamp": datetime.now().isoformat()
             }
             
             print(f"✅ Respuesta generada en {response_time:.2f}s")
@@ -198,19 +197,23 @@ class CybersecurityQAEvaluator:
             
         except Exception as e:
             print(f"❌ ERROR evaluando pregunta: {e}")
+            
+            # Obtener datos originales para el error también
+            original_data = question_data.get("original_data", {})
+            
             return {
-                "timestamp": datetime.now().isoformat(),
-                "question": question,
-                "expected_answer": expected_answer,
-                "rag_answer": f"ERROR: {str(e)}",
-                "response_time_seconds": 0,
-                "iterations": 0,
-                "num_sources": 0,
-                "sources": [],
-                "source_file": source,
-                "llm_provider": self.llm_provider,
-                "model": self.openai_model if self.llm_provider == "openai" else self.ollama_model,
-                "error": str(e)
+                # Incluir todas las columnas originales
+                **original_data,
+                # Agregar columnas de error
+                "RAG_Model": "Mistral7B",
+                "RAG_Response": f"ERROR: {str(e)}",
+                "RAG_Quality_Evaluation": "Error occurred - no evaluation available",
+                "RAG_Response_Time_Seconds": 0,
+                "RAG_Iterations": 0,
+                "RAG_Num_Sources": 0,
+                "RAG_Sources": [],
+                "RAG_Timestamp": datetime.now().isoformat(),
+                "RAG_Error": str(e)
             }
     
     def run_evaluation(self, max_questions: int = 10) -> List[Dict[str, Any]]:
@@ -279,11 +282,11 @@ class CybersecurityQAEvaluator:
                     ],
                     "Valor": [
                         len(self.results),
-                        round(df['response_time_seconds'].mean(), 2),
-                        round(df['response_time_seconds'].sum(), 2),
-                        round(df['num_sources'].mean(), 1),
+                        round(df['RAG_Response_Time_Seconds'].mean(), 2) if 'RAG_Response_Time_Seconds' in df.columns else 0,
+                        round(df['RAG_Response_Time_Seconds'].sum(), 2) if 'RAG_Response_Time_Seconds' in df.columns else 0,
+                        round(df['RAG_Num_Sources'].mean(), 1) if 'RAG_Num_Sources' in df.columns else 0,
                         self.llm_provider,
-                        self.openai_model if self.llm_provider == "openai" else self.ollama_model,
+                        "Mistral7B",
                         datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                     ]
                 }
@@ -292,9 +295,10 @@ class CybersecurityQAEvaluator:
                 summary_df.to_excel(writer, sheet_name='Resumen', index=False)
                 
                 # Hoja de errores (si los hay)
-                error_results = df[df['rag_answer'].str.contains('ERROR', na=False)]
-                if not error_results.empty:
-                    error_results.to_excel(writer, sheet_name='Errores', index=False)
+                if 'RAG_Response' in df.columns:
+                    error_results = df[df['RAG_Response'].str.contains('ERROR', na=False)]
+                    if not error_results.empty:
+                        error_results.to_excel(writer, sheet_name='Errores', index=False)
             
             print(f"✅ Resultados guardados exitosamente en: {filename}")
             return filename
@@ -357,10 +361,17 @@ def main():
             
             # Mostrar estadísticas rápidas
             if results:
-                avg_time = sum(r['response_time_seconds'] for r in results) / len(results)
-                total_sources = sum(r['num_sources'] for r in results)
-                print(f"⏱️  Tiempo promedio por pregunta: {avg_time:.2f}s")
-                print(f"📚 Total de fuentes encontradas: {total_sources}")
+                # Extraer métricas correctamente
+                times = [r.get('RAG_Response_Time_Seconds', 0) for r in results if 'RAG_Response_Time_Seconds' in r]
+                sources = [r.get('RAG_Num_Sources', 0) for r in results if 'RAG_Num_Sources' in r]
+                
+                if times:
+                    avg_time = sum(times) / len(times)
+                    print(f"⏱️  Tiempo promedio por pregunta: {avg_time:.2f}s")
+                
+                if sources:
+                    total_sources = sum(sources)
+                    print(f"📚 Total de fuentes encontradas: {total_sources}")
         
         return 0
         

@@ -93,6 +93,14 @@ class RAGContext:
         self.original_query: str = ""
         self.current_answer: str = ""
         self.retrieved_passages: List[Dict] = []
+    
+    def reset(self):
+        """Reset context for new query"""
+        self.passages = []
+        self.query = ""
+        self.current_answer = ""
+        self.retrieved_passages = []
+        self.iterations = 0
 
 
 # Global instance
@@ -103,9 +111,18 @@ rag_context: Optional[RAGContext] = None
 # TOOLS
 # ============================================================================
 
-@tool("search_weaviate")
+@tool
 def search_weaviate(query: str, k: int = 8, agent_type: str = "general") -> str:
-    """Search in Weaviate with specific parameters."""
+    """Search in Weaviate with specific parameters.
+    
+    Args:
+        query: The search query string
+        k: Number of results to retrieve (default: 8)
+        agent_type: Agent type for search (general, security, none)
+    
+    Returns:
+        JSON string with search results
+    """
     if rag_context is None:
         return json.dumps({"error": "Context not initialized"})
     
@@ -168,12 +185,11 @@ def create_hyde_generator(llm) -> Agent:
     """Agent 1: HyDE Generator - Generates hypothetical answers without context"""
     return Agent(
         role="HyDE Generator",
-        goal="Generate comprehensive hypothetical answers to user queries without searching documents",
+        goal="Generate direct, concise hypothetical answers with neutral professional language",
         backstory=(
             "You are an expert in generating hypothetical answers for HyDE (Hypothetical Document Embeddings). "
-            "Your job is to create detailed, well-structured answers that simulate what a comprehensive "
-            "response would look like. You write as if you were an expert answering the question, "
-            "including key concepts, definitions, examples, and technical details. "
+            "You write direct, concise responses with neutral professional language. "
+            "Avoid verbosity and excessive adjectives. Include key concepts and technical details without over-adjectivization. "
             "You do NOT search for information - you generate based on your knowledge."
         ),
         tools=[],  # No tools - pure generation
@@ -188,12 +204,12 @@ def create_retrieval_response_agent(llm) -> Agent:
     """Agent 2: Retrieval & Response - Uses search_weaviate to find documents and generate final response"""
     return Agent(
         role="Retrieval & Response Specialist",
-        goal="Use search_weaviate to retrieve relevant documents and generate final grounded responses",
+        goal="Generate direct, concise final responses using retrieved documents with neutral professional language",
         backstory=(
             "You are an expert in RAG (Retrieval-Augmented Generation). You receive hypothetical answers "
             "from the HyDE Generator and use them to find the most relevant documents in the knowledge base. "
-            "Then you generate the final answer using only the retrieved documents as evidence. "
-            "You excel at grounding responses in real evidence and citing sources accurately."
+            "Then you generate direct, concise final answers using only the retrieved documents as evidence. "
+            "You use neutral professional language, avoid verbosity, and ground responses accurately."
         ),
         tools=[search_weaviate],
         llm=llm,
@@ -231,70 +247,77 @@ def create_hyde_generation_task(agent: Agent, query: str) -> Task:
     """Task 1: Generate hypothetical answer without context"""
     return Task(
         description=(
-            f"Generate a comprehensive hypothetical answer to this question:\n\n"
+            f"IMPORTANT: Respuesta directa, concisa, lenguaje neutral y profesional. "
+            f"Sin adjetivación excesiva ni verborragia. Responde SOLO la pregunta.\n\n"
             f"Question: '{query}'\n\n"
             f"Requirements:\n"
-            f"- Write as if you were an expert answering this question\n"
-            f"- Include key concepts, definitions, and explanations\n"
+            f"- Answer directly and concisely - NO verbosity or excessive adjectives\n"
+            f"- Professional, neutral tone - avoid over-adjectivization\n"
+            f"- Respond ONLY the question asked - no extra information\n"
+            f"- Include key concepts, definitions, and explanations when necessary\n"
             f"- Use professional, technical language\n"
-            f"- Be detailed but concise (200-400 words)\n"
+            f"- Be concise (50-200 words)\n"
             f"- Do NOT mention that this is hypothetical\n"
             f"- Write in the same style as technical documentation\n"
-            f"- Include examples and practical applications when relevant\n\n"
-            f"Output: A comprehensive hypothetical answer that simulates what a complete response would look like."
+            f"- Include examples only when strictly relevant\n\n"
+            f"Output: A direct, concise hypothetical answer with neutral professional language."
         ),
         agent=agent,
         expected_output=(
-            "A detailed hypothetical answer (200-400 words) that covers the question comprehensively, "
-            "written in professional technical style without mentioning it's hypothetical."
+            "A direct, concise hypothetical answer (50-200 words) with neutral professional language, "
+            "covering the question without mentioning it's hypothetical."
         )
     )
 
 
-def create_retrieval_response_task(agent: Agent, query: str, hypothetical_answer: str) -> Task:
-    """Task 2: Use search_weaviate to retrieve documents and generate final response"""
+def create_retrieval_response_task(agent: Agent, query: str, hyde_task: Task, k: int = 5) -> Task:
+    """Task 2: Se actualizará con context de la tarea anterior"""
     return Task(
         description=(
-            f"Use search_weaviate to find relevant documents and generate the final response:\n\n"
+            f"IMPORTANT: Respuesta directa, concisa, lenguaje neutral profesional. "
+            f"Sin verbosidad ni adjetivación excesiva. Responde SOLO la pregunta.\n\n"
+            f"Use the hypothetical answer from the previous HyDE task to guide retrieval.\n\n"
             f"Original Query: '{query}'\n\n"
-            f"Hypothetical Answer (for context):\n{hypothetical_answer}\n\n"
             f"MANDATORY Process:\n"
-            f"1. Use 'search_weaviate' with these EXACT parameters:\n"
-            f"   - query: '{query}'\n"
-            f"   - k: 8\n"
-            f"   - agent_type: 'general'\n"
-            f"2. Analyze the retrieved documents\n"
+            f"1. Review the hypothetical answer from HyDE Generator (available in context)\n"
+            f"2. Call 'search_weaviate' function with the query and k=8:\n"
+            f"   - Pass the query string directly as the query parameter\n"
+            f"   - Set k to 8 (integer)\n"
+            f"   - Set agent_type to 'general' (string)\n"
             f"3. Generate the FINAL answer using ONLY the retrieved documents\n\n"
             f"MANDATORY Requirements for the final answer:\n"
+            f"- Answer DIRECTLY and CONCISELY - avoid verbosity\n"
+            f"- Professional, neutral language - NO excessive adjectives\n"
+            f"- Respond ONLY the question - no extra information\n"
             f"- Answer in English, clearly and concisely\n"
             f"- Minimum 100 words\n"
             f"- Do NOT include citations or source references\n"
             f"- Ground ALL claims in the retrieved documents but don't cite them\n"
             f"- If there are practical steps, use numbered lists\n"
             f"- If evidence is insufficient, be explicit about limitations\n"
-            f"- Write as a natural, flowing response without academic citations\n\n"
-            f"IMPORTANT: This is the FINAL answer that will be evaluated. "
-            f"Make it comprehensive and well-grounded in the retrieved evidence, but write it naturally without citations."
+            f"- Write naturally without academic citations\n\n"
+            f"IMPORTANT: This is the FINAL answer. Make it direct, concise, and well-grounded."
         ),
         agent=agent,
         expected_output=(
-            "Final comprehensive answer in English with:\n"
+            "Final direct and concise answer in English with:\n"
             "- Main answer (minimum 100 words)\n"
-            "- Natural, flowing text without citations\n"
+            "- Neutral, professional tone without excessive adjectives\n"
             "- Clear indication if information is missing\n"
             "- All claims grounded in retrieved documents\n"
-            "- Professional but accessible tone"
-        )
+            "- No verbosity or unnecessary elaboration"
+        ),
+        context=[hyde_task]  # ✅ Esto permite acceder al output de hyde_task
     )
 
 
-def create_quality_evaluation_task(agent: Agent, query: str, final_answer: str, sources: List[Dict]) -> Task:
-    """Task 3: Evaluate response quality across multiple dimensions"""
+def create_quality_evaluation_task(agent: Agent, query: str, retrieval_task: Task, sources: List[Dict]) -> Task:
+    """Task 3: Evaluará la respuesta de la tarea anterior"""
     return Task(
         description=(
-            f"Evaluate the quality of the generated response across three key dimensions:\n\n"
+            f"Evaluate the quality of the generated response across three key dimensions.\n\n"
             f"Original Query: '{query}'\n\n"
-            f"Generated Response:\n{final_answer}\n\n"
+            f"The response to evaluate is available from the previous task.\n\n"
             f"Retrieved Sources: {len(sources)} documents\n"
             f"Source IDs: {[s.get('doc_id', 'N/A') for s in sources[:3]]}\n\n"
             f"Evaluation Criteria:\n\n"
@@ -314,17 +337,23 @@ def create_quality_evaluation_task(agent: Agent, query: str, final_answer: str, 
             f"- APPROVE: All scores ≥ 7, high quality response\n"
             f"- REFINE: Any score < 7 but > 4, needs improvement\n"
             f"- REJECT: Any score ≤ 4, poor quality\n\n"
-            f"Provide detailed scores and reasoning for your decision."
+            f"CRITICAL: You MUST use this EXACT output format:\n\n"
+            f"DECISION: [APPROVE/REFINE/REJECT]\n\n"
+            f"RELEVANCE: [Score 0-10] - [Brief one-sentence justification]\n\n"
+            f"GROUNDEDNESS: [Score 0-10] - [Brief one-sentence justification]\n\n"
+            f"COMPLETENESS: [Score 0-10] - [Brief one-sentence justification]\n\n"
+            f"SUMMARY: [One paragraph summarizing the overall evaluation]"
         ),
         agent=agent,
         expected_output=(
-            "Detailed evaluation with:\n"
-            "- Relevance score (0-10) with reasoning\n"
-            "- Groundedness score (0-10) with reasoning\n"
-            "- Completeness score (0-10) with reasoning\n"
-            "- Overall decision: APPROVE/REFINE/REJECT\n"
-            "- Specific feedback for improvement (if REFINE/REJECT)"
-        )
+            "Evaluation in EXACT format:\n"
+            "DECISION: [APPROVE/REFINE/REJECT]\n\n"
+            "RELEVANCE: [0-10] - [one sentence]\n\n"
+            "GROUNDEDNESS: [0-10] - [one sentence]\n\n"
+            "COMPLETENESS: [0-10] - [one sentence]\n\n"
+            "SUMMARY: [one paragraph]\n"
+        ),
+        context=[retrieval_task]  # ✅ Accede al output de retrieval_task
     )
 
 
@@ -333,21 +362,22 @@ def create_quality_evaluation_task(agent: Agent, query: str, final_answer: str, 
 # ============================================================================
 
 class OptimizedCrewAIRAG:
-    """Optimized RAG system with 3 specialized agents"""
+    """Optimized RAG system with 3 specialized agents - Single iteration mode"""
     
     def __init__(
         self,
         weaviate_client,
         model: str = "mistral",
         ollama_host: str = "http://localhost:11434",
-        max_iterations: int = 1,
+        max_iterations: int = 1,  # Always 1 - kept for API compatibility
         llm_provider: str = "ollama",
         openai_api_key: str = None
     ):
         global rag_context
         rag_context = RAGContext(weaviate_client)
         
-        self.max_iterations = max_iterations
+        # Force single iteration - always 1
+        self.max_iterations = 1
         
         # Configure LLM according to provider
         if llm_provider.lower() == "openai":
@@ -368,10 +398,9 @@ class OptimizedCrewAIRAG:
             self.llm = ChatOllama(
                 model=f"ollama/{model}",
                 base_url=ollama_host,
-                temperature=0.3,
-                format="json"
+                temperature=0.3
             )
-            print(f"🤖 Using Ollama: {model}")
+            print(f"🤖 Using Ollama: {model} (text mode)")
         
         # Create optimized agents
         print("🔍 Using Optimized HyDE Architecture (3 Specialized Agents)")
@@ -385,96 +414,91 @@ class OptimizedCrewAIRAG:
         """Process a query with the optimized 3-agent system"""
         
         print(f"\n{'='*80}")
-        print(f"🚀 OPTIMIZED CREWAI RAG - 3 AGENT ARCHITECTURE")
+        print("🚀 OPTIMIZED CREWAI RAG - 3 AGENT ARCHITECTURE")
         print(f"{'='*80}")
         print(f"Query: {query}")
         print()
         
+        # Reset context for new query
+        rag_context.reset()
         rag_context.original_query = query
         current_query = query
         
         try:
-            for iteration in range(self.max_iterations):
-                rag_context.iterations = iteration + 1
-                
-                print(f"\n{'─'*80}")
-                print(f"🔄 ITERATION {iteration + 1}/{self.max_iterations}")
-                print(f"{'─'*80}\n")
-                
-                # Phase 1: HyDE Generation
-                print("📝 Phase 1: HyDE Generation")
-                hyde_task = create_hyde_generation_task(
-                    self.agents["hyde_generator"],
-                    current_query
-                )
-                
-                # Execute HyDE task first to get the hypothetical answer
-                hyde_crew = Crew(
-                    agents=[self.agents["hyde_generator"]],
-                    tasks=[hyde_task],
-                    process=Process.sequential,
-                    verbose=verbose
-                )
-                hyde_result = hyde_crew.kickoff()
-                hypothetical_answer = str(hyde_result)
-                
-                # Phase 2: Retrieval & Response
-                print("\n🔍✍️ Phase 2: Retrieval & Response")
-                retrieval_task = create_retrieval_response_task(
-                    self.agents["retrieval_response"],
-                    current_query,
-                    hypothetical_answer
-                )
-                
-                # Phase 3: Quality Evaluation
-                print("\n🎯 Phase 3: Quality Evaluation")
-                quality_task = create_quality_evaluation_task(
-                    self.agents["quality_evaluator"],
-                    current_query,
-                    "Generated response will be evaluated",
-                    rag_context.retrieved_passages or []
-                )
-                
-                # Create crew
-                crew = Crew(
-                    agents=list(self.agents.values()),
-                    tasks=[hyde_task, retrieval_task, quality_task],
-                    process=Process.sequential,
-                    verbose=verbose
-                )
-                
-                # Execute crew
-                print("\n🎬 Executing Crew...")
-                result = crew.kickoff()
-                
-                # Parse result - get the answer from the second task (Retrieval & Response)
-                try:
-                    # The result is a list of task results, we want the second one (Retrieval & Response)
-                    if hasattr(result, '__iter__') and len(result) >= 2:
-                        final_answer = str(result[1])  # Second task result
-                    else:
-                        final_answer = str(result)
+            # Single iteration mode - always execute once
+            rag_context.iterations = 1
+            k_value = 5  # Optimizado para velocidad
+            
+            print(f"\n{'─'*80}")
+            print("🔄 SINGLE ITERATION MODE")
+            print(f"{'─'*80}\n")
+            print(f"📊 Using k={k_value} for retrieval")
+            
+            # Create all tasks
+            print("📝 Creating tasks...")
+            hyde_task = create_hyde_generation_task(
+                self.agents["hyde_generator"],
+                current_query
+            )
+            
+            retrieval_task = create_retrieval_response_task(
+                self.agents["retrieval_response"],
+                current_query,
+                hyde_task,  # ✅ Pass HyDE task for context
+                k=k_value
+            )
+            
+            quality_task = create_quality_evaluation_task(
+                self.agents["quality_evaluator"],
+                current_query,
+                retrieval_task,  # ✅ Pass Retrieval task for context
+                rag_context.retrieved_passages or []
+            )
+            
+            # Ejecutar todo en un solo crew secuencial
+            print("\n🎬 Executing all tasks sequentially...")
+            crew = Crew(
+                agents=list(self.agents.values()),
+                tasks=[hyde_task, retrieval_task, quality_task],
+                process=Process.sequential,
+                verbose=verbose
+            )
+            
+            result = crew.kickoff()
+            
+            # El resultado será una lista con outputs de cada tarea
+            try:
+                if hasattr(result, 'tasks_output') and len(result.tasks_output) >= 3:
+                    # Acceder al contenido raw de cada task output
+                    hyde_output = result.tasks_output[0].raw
+                    retrieval_output = result.tasks_output[1].raw
+                    quality_output = result.tasks_output[2].raw
                     
-                    # Check quality evaluation (third task)
-                    if hasattr(result, '__iter__') and len(result) >= 3:
-                        quality_result = str(result[2])
-                        if "APPROVE" in quality_result.upper():
-                            print("\n✅ Answer APPROVED by Quality Evaluator")
-                            break
-                        elif "REFINE" in quality_result.upper():
-                            print("\n🔄 Quality Evaluator requests REFINEMENT")
-                            current_query = f"{query} examples use cases implementation"
-                            continue
-                    else:
-                        break
-                except Exception:
+                    final_answer = retrieval_output
+                    quality_evaluation = quality_output
+                    
+                    print(f"\n✅ Successfully parsed {len(result.tasks_output)} task outputs")
+                    
+                else:
+                    # Fallback: intentar como string directo
+                    print(f"\n⚠️ Using fallback parsing (tasks_output not available)")
                     final_answer = str(result)
-                    break
+                    quality_evaluation = "No structured evaluation available"
+                    
+            except AttributeError as e:
+                print(f"⚠️ AttributeError accessing task outputs: {e}")
+                final_answer = str(result)
+                quality_evaluation = "Error accessing task outputs"
+            except Exception as e:
+                print(f"⚠️ Error parsing results: {e}")
+                final_answer = str(result)
+                quality_evaluation = "Error occurred - no evaluation available"
             
             return {
                 "query": rag_context.original_query,
                 "final_query": current_query,
                 "answer": final_answer,
+                "quality_evaluation": quality_evaluation,
                 "passages": rag_context.retrieved_passages,
                 "iterations": rag_context.iterations,
                 "agents_used": list(self.agents.keys())
@@ -485,6 +509,7 @@ class OptimizedCrewAIRAG:
             return {
                 "query": rag_context.original_query,
                 "answer": "Process interrupted by user",
+                "quality_evaluation": "Process interrupted - no evaluation available",
                 "passages": rag_context.retrieved_passages,
                 "iterations": rag_context.iterations,
                 "agents_used": list(self.agents.keys())
@@ -494,6 +519,7 @@ class OptimizedCrewAIRAG:
             return {
                 "query": rag_context.original_query,
                 "answer": f"Error: {str(e)}",
+                "quality_evaluation": "Error occurred - no evaluation available",
                 "passages": rag_context.retrieved_passages,
                 "iterations": rag_context.iterations,
                 "agents_used": list(self.agents.keys())
