@@ -13,9 +13,10 @@ ScriptsExtractData/download_progress.json
 *.jsons
 *.jsonl
 
-# Archivos de configuración de Weaviate
-weaviate/
-!weaviate/.gitkeep
+# Archivos de configuración de Weaviate (permitir código, ignorar datos locales)
+weaviate_data/
+weaviate/.env*
+weaviate/*.log
 
 # PDFs (todos los PDFs son pesados)
 *.pdf

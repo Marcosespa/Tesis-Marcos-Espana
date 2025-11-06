@@ -10,7 +10,7 @@ Optimized 3-agent architecture:
 Usage:
   python crewai_agentic_rag_optimized.py "What is MFA?"
 """
-
+import os
 import argparse
 import sys
 import json
@@ -38,6 +38,25 @@ try:
     from langchain_openai import ChatOpenAI
 except ImportError:
     ChatOpenAI = None
+
+# Azure OpenAI (LangChain wrapper)
+try:
+    # Available in langchain-openai recent versions
+    from langchain_openai import AzureChatOpenAI  # type: ignore
+except Exception:
+    AzureChatOpenAI = None  # type: ignore
+
+# Direct Azure OpenAI client (to avoid litellm issues)
+try:
+    from openai import AzureOpenAI
+    from langchain_core.language_models.chat_models import BaseChatModel
+    from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, SystemMessage
+    from langchain_core.outputs import ChatGeneration, ChatResult
+    from typing import List, Optional, Any
+    AZURE_OPENAI_AVAILABLE = True
+except Exception:
+    AZURE_OPENAI_AVAILABLE = False
+    AzureOpenAI = None
 
 from rag.search.multi_class_search import (
     MultiClassSemanticSearch,
@@ -358,6 +377,135 @@ def create_quality_evaluation_task(agent: Agent, query: str, retrieval_task: Tas
 
 
 # ============================================================================
+# CUSTOM AZURE OPENAI WRAPPER (to avoid litellm issues)
+# ============================================================================
+
+class DirectAzureChatOpenAI(BaseChatModel):
+    """Wrapper personalizado usando directamente AzureOpenAI de OpenAI para evitar litellm"""
+    
+    model_config = {"arbitrary_types_allowed": True}
+    
+    azure_endpoint: str
+    api_key: str
+    api_version: str
+    azure_deployment: str
+    temperature: float = 0.3
+    max_tokens: int = 1000
+    client: Any = None
+    
+    def __init__(
+        self,
+        azure_endpoint: str,
+        api_key: str,
+        api_version: str,
+        azure_deployment: str,
+        temperature: float = 0.3,
+        max_tokens: int = 1000
+    ):
+        # Limpiar endpoint
+        azure_endpoint_clean = azure_endpoint.rstrip('/')
+        
+        # Crear cliente Azure OpenAI directamente (como en test.py)
+        client = AzureOpenAI(
+            api_version=api_version,
+            azure_endpoint=azure_endpoint_clean,
+            api_key=api_key,
+        )
+        
+        # Llamar al constructor de BaseChatModel con los campos
+        super().__init__(
+            azure_endpoint=azure_endpoint_clean,
+            api_key=api_key,
+            api_version=api_version,
+            azure_deployment=azure_deployment,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            client=client
+        )
+    
+    @property
+    def _llm_type(self) -> str:
+        return "azure_openai"
+    
+    def __str__(self) -> str:
+        """Retornar string que litellm pueda entender como modelo Azure"""
+        return f"azure/{self.azure_deployment}"
+    
+    def __repr__(self) -> str:
+        """Retornar representación del wrapper"""
+        return f"DirectAzureChatOpenAI(deployment={self.azure_deployment}, endpoint={self.azure_endpoint})"
+    
+    @property
+    def _identifying_params(self) -> Dict[str, Any]:
+        """Parámetros identificadores para evitar que litellm lo intercepte"""
+        return {
+            "azure_endpoint": self.azure_endpoint,
+            "azure_deployment": self.azure_deployment,
+            "api_version": self.api_version
+        }
+    
+    def invoke(self, messages: List[BaseMessage], **kwargs: Any) -> BaseMessage:
+        """Método invoke que CrewAI espera"""
+        result = self._generate(messages, **kwargs)
+        return result.generations[0].message
+    
+    def __call__(self, messages: List[BaseMessage], **kwargs: Any) -> BaseMessage:
+        """Método __call__ para compatibilidad con CrewAI"""
+        return self.invoke(messages, **kwargs)
+    
+    def predict(self, text: str, **kwargs: Any) -> str:
+        """Método predict para compatibilidad con LangChain"""
+        msg = HumanMessage(content=text)
+        result = self.invoke([msg], **kwargs)
+        return result.content if hasattr(result, 'content') else str(result)
+    
+    def predict_messages(self, messages: List[BaseMessage], **kwargs: Any) -> BaseMessage:
+        """Método predict_messages para compatibilidad con LangChain"""
+        return self.invoke(messages, **kwargs)
+    
+    def _generate(
+        self,
+        messages: List[BaseMessage],
+        stop: Optional[List[str]] = None,
+        run_manager: Optional[Any] = None,
+        **kwargs: Any,
+    ) -> ChatResult:
+        # Convertir mensajes de LangChain a formato OpenAI
+        openai_messages = []
+        for msg in messages:
+            if isinstance(msg, SystemMessage):
+                openai_messages.append({"role": "system", "content": msg.content})
+            elif isinstance(msg, HumanMessage):
+                openai_messages.append({"role": "user", "content": msg.content})
+            elif isinstance(msg, AIMessage):
+                openai_messages.append({"role": "assistant", "content": msg.content})
+        
+        # Llamar directamente a Azure OpenAI (como en test.py)
+        response = self.client.chat.completions.create(
+            model=self.azure_deployment,
+            messages=openai_messages,
+            temperature=self.temperature,
+            max_tokens=self.max_tokens,
+            **kwargs
+        )
+        
+        # Convertir respuesta a formato LangChain
+        message = AIMessage(content=response.choices[0].message.content)
+        generation = ChatGeneration(message=message)
+        return ChatResult(generations=[generation])
+    
+    async def _agenerate(
+        self,
+        messages: List[BaseMessage],
+        stop: Optional[List[str]] = None,
+        run_manager: Optional[Any] = None,
+        **kwargs: Any,
+    ) -> ChatResult:
+        # Para async, usar sync por ahora (puede mejorarse después)
+        return self._generate(messages, stop, run_manager, **kwargs)
+
+
+# ============================================================================
 # OPTIMIZED RAG SYSTEM
 # ============================================================================
 
@@ -371,7 +519,12 @@ class OptimizedCrewAIRAG:
         ollama_host: str = "http://localhost:11434",
         max_iterations: int = 1,  # Always 1 - kept for API compatibility
         llm_provider: str = "ollama",
-        openai_api_key: str = None
+        openai_api_key: str = None,
+        # Azure OpenAI specific (optional)
+        azure_endpoint: str = None,
+        azure_deployment: str = None,
+        azure_api_key: str = None,
+        azure_api_version: str = "2024-12-01-preview"
     ):
         global rag_context
         rag_context = RAGContext(weaviate_client)
@@ -393,14 +546,97 @@ class OptimizedCrewAIRAG:
                 max_tokens=1000
             )
             print(f"🤖 Using OpenAI: {model}")
+        elif llm_provider.lower() == "azure_openai":
+            # Usar wrapper personalizado que evita litellm usando AzureOpenAI directamente
+            if not AZURE_OPENAI_AVAILABLE:
+                raise ImportError(
+                    "Azure OpenAI no está disponible. Instala: pip install openai langchain-core"
+                )
+            if not all([azure_endpoint, azure_deployment, azure_api_key]):
+                raise ValueError("azure_endpoint, azure_deployment and azure_api_key are required for azure_openai")
+            
+            # Asegurar que el endpoint no termine en /
+            azure_endpoint_clean = azure_endpoint.rstrip('/')
+            
+            # Crear wrapper personalizado que usa directamente AzureOpenAI (como test.py)
+            # Esto evita completamente litellm ya que llama directamente a Azure OpenAI
+            
+            # Monkey patch para evitar que litellm intercepte nuestro wrapper
+            import os
+            # Establecer variables que indican que NO usar litellm
+            os.environ["LITELLM_LOCAL_MODEL_COST_MAP"] = ""
+            os.environ["LITELLM_MASTER_KEY"] = ""
+            # Intentar deshabilitar litellm completamente
+            try:
+                import litellm
+                # Guardar referencia a nuestro wrapper que se creará
+                wrapper_ref = [None]
+                
+                # Deshabilitar litellm para nuestro wrapper
+                original_completion = litellm.completion
+                def patched_completion(*args, **kwargs):
+                    # Verificar si el modelo es nuestro wrapper o si es un string que empieza con "azure/"
+                    model_param = kwargs.get('model') or (args[0] if args else None)
+                    
+                    # Si es nuestro wrapper o si es un string azure/ que corresponde a nuestro wrapper
+                    if isinstance(model_param, DirectAzureChatOpenAI):
+                        wrapper = model_param
+                    elif isinstance(model_param, str) and model_param.startswith('azure/') and wrapper_ref[0]:
+                        wrapper = wrapper_ref[0]
+                    else:
+                        return original_completion(*args, **kwargs)
+                    
+                    # Extraer parámetros del wrapper
+                    client = wrapper.client
+                    messages = kwargs.get('messages', [])
+                    # Llamar directamente a Azure OpenAI (como en test.py)
+                    response = client.chat.completions.create(
+                        model=wrapper.azure_deployment,
+                        messages=messages,
+                        temperature=wrapper.temperature,
+                        max_tokens=wrapper.max_tokens
+                    )
+                    # Retornar el objeto response directamente (ya tiene el formato correcto)
+                    return response
+                
+                litellm.completion = patched_completion
+                
+                # Crear wrapper y guardar referencia
+                wrapper_instance = DirectAzureChatOpenAI(
+                    azure_endpoint=azure_endpoint_clean,
+                    api_key=azure_api_key,
+                    api_version=azure_api_version,
+                    azure_deployment=azure_deployment,
+                    temperature=0.3,
+                    max_tokens=1000
+                )
+                wrapper_ref[0] = wrapper_instance
+                self.llm = wrapper_instance
+            except Exception as e:
+                # Si falla el monkey patch, crear wrapper sin monkey patch
+                print(f"⚠️ Warning: No se pudo hacer monkey patch de litellm: {e}")
+                self.llm = DirectAzureChatOpenAI(
+                    azure_endpoint=azure_endpoint_clean,
+                    api_key=azure_api_key,
+                    api_version=azure_api_version,
+                    azure_deployment=azure_deployment,
+                    temperature=0.3,
+                    max_tokens=1000
+                )
+            
+            print(f"🤖 Using Azure OpenAI (Direct - bypasses litellm): deployment={azure_deployment} (api_version={azure_api_version})")
+            print(f"   Endpoint: {azure_endpoint_clean}")
+            print(f"   API Key (last 8): {azure_api_key[-8:]}")
             
         else:  # ollama by default
             self.llm = ChatOllama(
                 model=f"ollama/{model}",
                 base_url=ollama_host,
-                temperature=0.3
+                temperature=0.3,
+                num_ctx=8192,  # Aumentar contexto para Qwen
+                request_timeout=900  # 15 minutos timeout para modelos lentos
             )
-            print(f"🤖 Using Ollama: {model} (text mode)")
+            print(f"🤖 Using Ollama: {model} (text mode, timeout=900s, context=8192)")
         
         # Create optimized agents
         print("🔍 Using Optimized HyDE Architecture (3 Specialized Agents)")
@@ -536,21 +772,21 @@ def format_output(result: Dict[str, Any]) -> str:
         "\n" + "="*80,
         " FINAL RESULT - OPTIMIZED CREWAI RAG",
         "="*80,
-        f"\nOriginal Query: {result['query']}",
-        f"Final Query: {result['final_query']}",
-        f"Iterations: {result['iterations']}",
-        f"Agents Used: {', '.join(result['agents_used'])}",
-        f"Sources Retrieved: {len(result['passages'])} documents",
+        f"\nOriginal Query: {result.get('query', '')}",
+        f"Final Query: {result.get('final_query', '')}",
+        f"Iterations: {result.get('iterations', 0)}",
+        f"Agents Used: {', '.join(result.get('agents_used', []))}",
+        f"Sources Retrieved: {len(result.get('passages', []))} documents",
         f"\n{'-'*80}",
         "\n📄 ANSWER:\n",
         "-"*80,
-        result['answer'],
+        result.get('answer', ''),
         f"\n{'-'*80}",
         "\n📊 METRICS:\n",
         "-"*80,
-        f"• Documents retrieved: {len(result['passages'])}",
-        f"• Average relevance score: {sum(p['score'] for p in result['passages']) / len(result['passages']) if result['passages'] else 0:.3f}",
-        f"• Processing iterations: {result['iterations']}",
+        f"• Documents retrieved: {len(result.get('passages', []))}",
+        f"• Average relevance score: {sum(p['score'] for p in result.get('passages', [])) / len(result.get('passages', [])) if result.get('passages') else 0:.3f}",
+        f"• Processing iterations: {result.get('iterations', 0)}",
         "="*80 + "\n"
     ]
     
@@ -579,11 +815,17 @@ def main():
     parser.add_argument("--ollama-host", default="http://localhost:11434")
     
     # Arguments for OpenAI
-    parser.add_argument("--llm-provider", choices=["ollama", "openai"], default="ollama", 
-                       help="LLM provider: ollama or openai")
+    parser.add_argument("--llm-provider", choices=["ollama", "openai", "azure_openai"], default="ollama", 
+                       help="LLM provider: ollama, openai or azure_openai")
     parser.add_argument("--openai-api-key", help="OpenAI API Key (required if --llm-provider=openai)")
     parser.add_argument("--openai-model", default="gpt-3.5-turbo", 
                        help="OpenAI model (e.g.: gpt-3.5-turbo, gpt-4, gpt-4-turbo)")
+    
+    # Azure OpenAI args
+    parser.add_argument("--azure-endpoint", default=None, help="Azure OpenAI endpoint URL")
+    parser.add_argument("--azure-deployment", default="gpt-4.1", help="Azure OpenAI deployment name (default: gpt-4.1)")
+    parser.add_argument("--azure-api-key", default=None, help="Azure OpenAI API key")
+    parser.add_argument("--azure-api-version", default="2024-12-01-preview", help="Azure OpenAI API version")
     
     args = parser.parse_args()
     
@@ -611,6 +853,12 @@ def main():
             if not args.openai_api_key:
                 print("❌ ERROR: --openai-api-key is required to use OpenAI")
                 return 1
+        elif args.llm_provider == "azure_openai":
+            model_name = args.azure_deployment or ""
+            azure_api_key = args.azure_api_key 
+            if not (args.azure_endpoint and args.azure_deployment and azure_api_key):
+                print("ERROR: --azure-endpoint, --azure-deployment y --azure-api-key son requeridos")
+                return 1
         else:
             model_name = args.model
         
@@ -622,7 +870,11 @@ def main():
             ollama_host=args.ollama_host,
             max_iterations=args.max_iterations,
             llm_provider=args.llm_provider,
-            openai_api_key=args.openai_api_key
+            openai_api_key=args.openai_api_key,
+            azure_endpoint=args.azure_endpoint,
+            azure_deployment=args.azure_deployment,
+            azure_api_key=azure_api_key,
+            azure_api_version=args.azure_api_version
         )
         
         # Process query
