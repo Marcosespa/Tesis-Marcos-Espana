@@ -855,7 +855,7 @@ def main():
                 return 1
         elif args.llm_provider == "azure_openai":
             model_name = args.azure_deployment or ""
-            azure_api_key = args.azure_api_key 
+            azure_api_key = args.azure_api_key
             if not (args.azure_endpoint and args.azure_deployment and azure_api_key):
                 print("ERROR: --azure-endpoint, --azure-deployment y --azure-api-key son requeridos")
                 return 1
