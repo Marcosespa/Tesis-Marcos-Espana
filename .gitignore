@@ -36,6 +36,7 @@ __pycache__/
 
 # Virtual environments
 venv/
+venv_ft/
 .env/
 .env*/
 .venv/
@@ -98,6 +99,7 @@ node_modules/
 *.safetensors
 *.bin
 *.safetensors
+models/
 
 # Datasets grandes
 datasets/
