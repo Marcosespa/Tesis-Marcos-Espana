@@ -46,11 +46,17 @@ def load_model_and_tokenizer(base_model: str, max_seq_len: int = 2048):
         tokenizer.pad_token = tokenizer.eos_token
         tokenizer.pad_token_id = tokenizer.eos_token_id
     
+    bnb_config = BitsAndBytesConfig(
+        load_in_4bit=True,
+        bnb_4bit_use_double_quant=True,
+        bnb_4bit_quant_type="nf4",
+        bnb_4bit_compute_dtype=torch.bfloat16
+    )
     # Cargar modelo
     model = AutoModelForCausalLM.from_pretrained(
         base_model,
-        torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32,
-        device_map="auto" if torch.cuda.is_available() else None,
+        device_map="cuda:2",
+        quantization_config=bnb_config,
         trust_remote_code=True
     )
     
@@ -173,8 +179,12 @@ def setup_lora(
     
     model = get_peft_model(model, lora_config)
     model.print_trainable_parameters()
-    
+    train_p, tot_p = model.get_nb_trainable_parameters()
+    print(f'Parametros entrenables:      {train_p/1e6:.2f}M')
+    print(f'Parametros totales:          {tot_p/1e6:.2f}M')
+    print(f'% de parametros entrenables: {100*train_p/tot_p:.2f}%')
     return model
+
 
 def tokenize_function(examples, tokenizer, max_length: int):
     """Tokeniza ejemplos para language modeling"""
@@ -199,6 +209,7 @@ def prepare_datasets(dataset_dir: Path, tokenizer, max_seq_len: int, train_split
     """Prepara datasets de entrenamiento y validación"""
     print(f"📂 Cargando datasets desde {dataset_dir}")
     
+    # /home/mespanac/ProyectoTesis/Tesis-Marcos-Espana/data/cybersecurity_domain
     # Cargar datasets
     train_file = dataset_dir / "train.jsonl"
     val_file = dataset_dir / "validation.jsonl"
@@ -300,6 +311,7 @@ def train(
         num_train_epochs=config['num_epochs'],
         per_device_train_batch_size=config['batch_size'],
         per_device_eval_batch_size=config['batch_size'],
+        auto_find_batch_size=True, # Si el batch size que usas puede ocasionar un OOM (Out of Memory) lo dividimos en 2 hasta que funcione.
         learning_rate=config['learning_rate'],
         warmup_steps=config.get('warmup_steps', 100),
         logging_steps=50,
