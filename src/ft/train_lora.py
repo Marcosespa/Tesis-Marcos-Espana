@@ -209,7 +209,6 @@ def prepare_datasets(dataset_dir: Path, tokenizer, max_seq_len: int, train_split
     """Prepara datasets de entrenamiento y validación"""
     print(f"📂 Cargando datasets desde {dataset_dir}")
     
-    # /home/mespanac/ProyectoTesis/Tesis-Marcos-Espana/data/cybersecurity_domain
     # Cargar datasets
     train_file = dataset_dir / "train.jsonl"
     val_file = dataset_dir / "validation.jsonl"
@@ -376,7 +375,7 @@ def main():
     parser.add_argument(
         '--dataset',
         type=Path,
-        default=Path('data/ft_datasets/cybersecurity_domain'),
+        default=Path('data/cybersecurity_domain'),
         help='Directorio con train.jsonl y validation.jsonl'
     )
     
