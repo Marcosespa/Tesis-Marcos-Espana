@@ -1,6 +1,31 @@
-base_model: "meta-llama/Llama-3.1-8B-Instruct"
-method: lora
+# Fine-tuning Configuration for Domain Adaptation
+base_model: "Qwen/Qwen2.5-1.5B-Instruct"  # Modelo pequeño (1.5B parámetros) - ideal para empezar
+# Características: 1.54B params, 28 capas, GQA, contexto 32K tokens
+method: lora  # lora or qlora
+
+# LoRA Configuration
+# ESTRATEGIA: Empezar con r=8 (pequeño), luego aumentar
+# FASE 1: Solo Atención (q_proj, k_proj, v_proj, o_proj)
+# FASE 2: Atención + MLP (gate_proj, up_proj, down_proj)
+lora_r: 8  # Empezar pequeño, luego aumentar
+lora_alpha: 16  # alpha = 2 * r (recomendado)
+lora_dropout: 0.05
+
+# Fases de entrenamiento
+# Phase 1: Solo atención (más rápido, menos parámetros)
+# Phase 2: Atención + MLP (más completo, más parámetros)
+lora_phase: "attention"  # "attention" o "attention_mlp"
+
+# Training Configuration
 learning_rate: 2e-4
 batch_size: 8
 num_epochs: 3
-max_seq_len: 2048
+max_seq_len: 2048  # Qwen soporta hasta 32K, pero 2048 es más eficiente para empezar
+gradient_accumulation_steps: 1
+warmup_steps: 100
+
+# Dataset Configuration
+min_words: 50
+max_words: 2000
+include_context: true
+train_split: 0.9
