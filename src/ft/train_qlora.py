@@ -1,14 +1,29 @@
 #!/usr/bin/env python3
 """
-Entrena modelo con LoRA/QLoRA para Domain Adaptation
-Usa texto plano (continuation pretraining) en lugar de instruction tuning
+Entrenamiento con QLoRA para Domain Adaptation
+Usa texto plano (continuation pretraining) sobre un dominio específico
+
+Configuración de GPUs:
+- Por defecto usa GPUs 0 y 1
+- ⚠️  IMPORTANTE: Para evitar usar otras GPUs (ej: GPU 2), usa CUDA_VISIBLE_QLORA
+- Forma SEGURA de ejecutar (recomendado):
+  CUDA_VISIBLE_QLORA=0,1 python src/ft/train_qlora.py --config ... --dataset ... --output ...
+- El modelo se guarda en: models/cybersecurity-qlora (separado de train_lora.py)
 """
 
 import argparse
+import json
+import os
 import yaml
 from pathlib import Path
 from typing import Optional
-import os
+
+# ⚠️ IMPORTANTE: Configurar CUDA_VISIBLE_DEVICES ANTES de importar torch
+# Leer CUDA_VISIBLE_QLORA y configurarla como CUDA_VISIBLE_DEVICES
+cuda_visible_qlora = os.environ.get("CUDA_VISIBLE_QLORA")
+if cuda_visible_qlora:
+    os.environ["CUDA_VISIBLE_DEVICES"] = cuda_visible_qlora
+    print(f"🔧 CUDA_VISIBLE_QLORA={cuda_visible_qlora} → CUDA_VISIBLE_DEVICES={cuda_visible_qlora}")
 
 # ⚠️ Deshabilitar verificación de torch.load para compatibilidad con checkpoints antiguos
 # Esto es necesario para PyTorch 2.5.1 con transformers 4.57.1
@@ -18,10 +33,17 @@ import torch
 from transformers import (
     AutoModelForCausalLM,
     AutoTokenizer,
-    TrainingArguments,
-    Trainer,
     BitsAndBytesConfig
 )
+from datasets import load_dataset
+from peft import (
+    LoraConfig, 
+    get_peft_model, 
+    TaskType,
+    prepare_model_for_kbit_training
+)
+from trl import SFTConfig, SFTTrainer
+
 
 # Función auxiliar para parchear la verificación de torch.load
 # Esto se usará después de importar transformers
@@ -63,16 +85,6 @@ def _patch_torch_load_check():
     except Exception as e:
         print(f"⚠️  Error al aplicar parche: {e}")
         return False
-from datasets import load_dataset
-from peft import (
-    LoraConfig, 
-    get_peft_model, 
-    TaskType,
-    PeftModel, 
-    PeftConfig,
-    prepare_model_for_kbit_training
-)
-from trl import SFTConfig, SFTTrainer
 
 
 def load_config(config_path: Path):
@@ -113,16 +125,33 @@ def load_config(config_path: Path):
     
     return config
 
-def load_model_and_tokenizer(base_model: str, max_seq_len: int = 2048):
-    """Carga modelo y tokenizer"""
+def load_model_and_tokenizer(base_model: str, max_seq_len: int = 2048, gpu_ids: list = [0, 1]):
+    """Carga modelo y tokenizer con cuantización 4-bit para QLoRA"""
     print(f"📥 Cargando modelo: {base_model}")
     
     if not torch.cuda.is_available():
-        raise EnvironmentError("CUDA no disponible. Se requiere GPU para entrenamiento en 4/8 bits.")
+        raise EnvironmentError("CUDA no disponible. Se requiere GPU para QLoRA (cuantización 4-bit).")
     
-    current_device = torch.cuda.current_device()
-    device_name = torch.cuda.get_device_name(current_device)
-    print(f"   Dispositivo destino: cuda:{current_device} ({device_name})")
+    # Verificar que las GPUs solicitadas estén disponibles
+    num_gpus = torch.cuda.device_count()
+    available_gpus = list(range(num_gpus))
+    
+    print(f"   GPUs disponibles: {available_gpus}")
+    print(f"   GPUs solicitadas: {gpu_ids}")
+    
+    # Filtrar solo las GPUs disponibles
+    valid_gpu_ids = [gpu_id for gpu_id in gpu_ids if gpu_id in available_gpus]
+    
+    if not valid_gpu_ids:
+        raise EnvironmentError(f"Ninguna de las GPUs solicitadas {gpu_ids} está disponible. GPUs disponibles: {available_gpus}")
+    
+    if len(valid_gpu_ids) < len(gpu_ids):
+        print(f"⚠️  Algunas GPUs no están disponibles. Usando: {valid_gpu_ids}")
+    
+    # Mostrar información de las GPUs que se usarán
+    for gpu_id in valid_gpu_ids:
+        device_name = torch.cuda.get_device_name(gpu_id)
+        print(f"   GPU {gpu_id}: {device_name}")
 
     tokenizer = AutoTokenizer.from_pretrained(base_model)
     
@@ -131,6 +160,7 @@ def load_model_and_tokenizer(base_model: str, max_seq_len: int = 2048):
         tokenizer.pad_token = tokenizer.eos_token
         tokenizer.pad_token_id = tokenizer.eos_token_id
     
+    # Configurar cuantización en 4 bits para QLoRA
     bnb_config = BitsAndBytesConfig(
         load_in_4bit=True,
         bnb_4bit_use_double_quant=True,
@@ -138,10 +168,43 @@ def load_model_and_tokenizer(base_model: str, max_seq_len: int = 2048):
         bnb_4bit_compute_dtype=torch.bfloat16
     )
     
+    # Configurar device_map para usar SOLO las GPUs especificadas
+    # IMPORTANTE: Para evitar usar otras GPUs (ej: GPU 2), usamos device_map específico
+    if len(valid_gpu_ids) == 1:
+        # Una sola GPU: usar directamente
+        device_map = {"": valid_gpu_ids[0]}
+        print(f"   ✅ Usando GPU {valid_gpu_ids[0]} únicamente")
+        print(f"   ✅ NO se usará ninguna otra GPU")
+    else:
+        # Múltiples GPUs: usar "balanced" o crear device_map personalizado
+        # Usamos "balanced" que distribuye mejor, pero necesitamos restringir
+        # La mejor forma es usar CUDA_VISIBLE_DEVICES antes de ejecutar
+        # Por ahora, usamos "auto" pero con advertencia
+        device_map = "auto"
+        # Verificar si CUDA_VISIBLE_QLORA está configurado
+        cuda_visible_qlora = os.environ.get("CUDA_VISIBLE_QLORA")
+        if cuda_visible_qlora:
+            print(f"   ✅ CUDA_VISIBLE_QLORA={cuda_visible_qlora} está configurado")
+            print(f"   ✅ Solo se usarán las GPUs especificadas en CUDA_VISIBLE_QLORA")
+        else:
+            print(f"   ⚠️  ADVERTENCIA: device_map='auto' puede usar TODAS las GPUs disponibles")
+            print(f"   📌 Para usar SOLO GPUs {valid_gpu_ids}, ejecuta con:")
+            print(f"      CUDA_VISIBLE_QLORA={','.join(map(str, valid_gpu_ids))} python src/ft/train_qlora.py ...")
+        print(f"   🔄 Distribuyendo modelo entre GPUs: {valid_gpu_ids}...")
+        
+        # Intentar crear un device_map más restrictivo usando accelerate si está disponible
+        try:
+            from accelerate import infer_auto_device_map
+            # Esto requiere conocer el tamaño del modelo, así que por ahora usamos "auto"
+            # pero documentamos la mejor práctica
+            pass
+        except ImportError:
+            pass
+    
     # Cargar modelo
     model = AutoModelForCausalLM.from_pretrained(
         base_model,
-        device_map={'': current_device},
+        device_map=device_map,
         quantization_config=bnb_config,
         trust_remote_code=True
     )
@@ -288,7 +351,7 @@ def setup_lora(
     Returns:
         Modelo con LoRA aplicado
     """
-    print(f"🔧 Configurando LoRA...")
+    print(f"🔧 Configurando LoRA para QLoRA...")
     print(f"   Fase: {phase}")
     print(f"   r={lora_r}, alpha={lora_alpha}, dropout={lora_dropout}")
     
@@ -317,51 +380,8 @@ def setup_lora(
     print(f'% de parametros entrenables: {100*train_p/tot_p:.2f}%')
     return model
 
-
-def tokenize_function(examples, tokenizer, max_length: int):
-    """Tokeniza ejemplos para language modeling"""
-    # Para domain adaptation, usamos el texto completo
-    texts = examples["text"]
-    
-    # Tokenizar
-    tokenized = tokenizer(
-        texts,
-        truncation=True,
-        max_length=max_length,
-        padding=False,
-        return_tensors=None
-    )
-    
-    return tokenized
-
-
-def build_causal_lm_collator(tokenizer):
-    """Crea un data collator que maneja padding y labels para causal LM"""
-    pad_token_id = tokenizer.pad_token_id if tokenizer.pad_token_id is not None else tokenizer.eos_token_id
-    
-    def collate(features):
-        # Remover labels existentes si vienen en los datos
-        clean_features = []
-        for feature in features:
-            clean_feature = {k: v for k, v in feature.items() if k != "labels"}
-            clean_features.append(clean_feature)
-        
-        batch = tokenizer.pad(
-            clean_features,
-            padding=True,
-            return_tensors="pt"
-        )
-        
-        labels = batch["input_ids"].clone()
-        if pad_token_id is not None:
-            labels[labels == pad_token_id] = -100
-        batch["labels"] = labels
-        return batch
-    
-    return collate
-
-def prepare_datasets(dataset_dir: Path, tokenizer, max_seq_len: int, train_split: float = 0.9):
-    """Prepara datasets de entrenamiento y validación"""
+def prepare_datasets(dataset_dir: Path, train_split: float = 0.9):
+    """Prepara datasets de entrenamiento y validación (sin tokenizar, SFTTrainer lo hace)"""
     print(f"📂 Cargando datasets desde {dataset_dir}")
     
     # Cargar datasets
@@ -384,97 +404,95 @@ def prepare_datasets(dataset_dir: Path, tokenizer, max_seq_len: int, train_split
     
     print(f"   Train: {len(train_dataset):,} ejemplos")
     print(f"   Validation: {len(val_dataset):,} ejemplos")
-    
-    # Tokenizar
-    print(f"🔄 Tokenizando datasets...")
-    
-    def tokenize(examples):
-        return tokenize_function(examples, tokenizer, max_seq_len)
-    
-    train_dataset = train_dataset.map(
-        tokenize,
-        batched=True,
-        remove_columns=train_dataset.column_names,
-        desc="Tokenizando train"
-    )
-    
-    val_dataset = val_dataset.map(
-        tokenize,
-        batched=True,
-        remove_columns=val_dataset.column_names,
-        desc="Tokenizando validation"
-    )
+    print(f"   ⚠️  Nota: SFTTrainer tokenizará automáticamente usando el campo 'text'")
     
     return train_dataset, val_dataset
 
-def train(
+def train_qlora(
     config_path: Path,
     output_dir: Path,
     dataset_dir: Path,
     resume_from_checkpoint: Optional[str] = None
 ):
-    """Entrena el modelo"""
+    """Entrena el modelo usando QLoRA con SFTTrainer"""
     
     # Cargar configuración
     config = load_config(config_path)
     print(f"📋 Configuración cargada desde {config_path}")
     print(f"   Modelo base: {config['base_model']}")
-    print(f"   Método: {config['method']}")
+    print(f"   Método: QLoRA")
     print(f"   Learning rate: {config['learning_rate']}")
     print(f"   Batch size: {config['batch_size']}")
     print(f"   Epochs: {config['num_epochs']}")
     print(f"   Max seq len: {config['max_seq_len']}")
     
-    requested_device = config.get('device', os.environ.get("FT_GPU"))
-    current_device = None
-    if torch.cuda.is_available():
-        current_device = torch.cuda.current_device()
-        device_name = torch.cuda.get_device_name(current_device)
-        print(f"🖥️  GPU activa (índice local): cuda:{current_device} ({device_name})")
-        if requested_device is not None:
-            print(f"   GPU solicitada (config/env): {requested_device} — usa CUDA_VISIBLE_DEVICES para ajustarla.")
+    # Obtener GPUs a usar desde configuración o usar [0, 1] por defecto
+    gpu_ids = config.get('gpu_ids', [0, 1])
+    if isinstance(gpu_ids, str):
+        # Si viene como string "0,1", convertir a lista
+        gpu_ids = [int(x.strip()) for x in gpu_ids.split(',')]
+    elif isinstance(gpu_ids, int):
+        # Si viene como un solo número, convertir a lista
+        gpu_ids = [gpu_ids]
+    
+    if not torch.cuda.is_available():
+        print("🖥️  GPU no disponible. Entrenar en CPU no es soportado para QLoRA.")
+        raise EnvironmentError("CUDA no disponible")
+    
+    # ⚠️ IMPORTANTE: Si CUDA_VISIBLE_QLORA está configurado, ignorar gpu_ids del config
+    # y usar todas las GPUs visibles (que ya están restringidas por CUDA_VISIBLE_DEVICES)
+    cuda_visible_qlora = os.environ.get("CUDA_VISIBLE_QLORA")
+    if cuda_visible_qlora:
+        # Cuando CUDA_VISIBLE_QLORA está configurado, usar todas las GPUs visibles
+        # (que PyTorch ve como 0, 1, 2, ... pero físicamente son las especificadas)
+        num_visible_gpus = torch.cuda.device_count()
+        gpu_ids = list(range(num_visible_gpus))
+        print(f"🖥️  Configuración de GPUs:")
+        print(f"   ✅ CUDA_VISIBLE_QLORA={cuda_visible_qlora} detectado")
+        print(f"   ✅ Ignorando gpu_ids del config, usando GPUs visibles: {gpu_ids}")
+        print(f"   📌 Físicamente se usará la(s) GPU(s): {cuda_visible_qlora}")
     else:
-        print("🖥️  GPU no disponible. Entrenar en CPU no es soportado para 4-bit.")
+        print(f"🖥️  Configuración de GPUs:")
+        print(f"   GPUs a usar (desde config): {gpu_ids}")
 
     # Cargar modelo y tokenizer
     model, tokenizer, max_seq_len = load_model_and_tokenizer(
         config['base_model'],
-        config['max_seq_len']
+        config['max_seq_len'],
+        gpu_ids=gpu_ids
     )
     
-    # Preparar modelo para entrenamiento en baja precisión (requerido para QLoRA/LoRA 4-bit)
+    # Preparar modelo para entrenamiento en baja precisión (requerido para QLoRA)
     model = prepare_model_for_kbit_training(model)
     if hasattr(model, "config"):
         model.config.use_cache = False
     if hasattr(model, "gradient_checkpointing_enable"):
-        model.gradient_checkpointing_enable()
+        # Gradient checkpointing más eficiente (evita warnings y mejora compatibilidad)
+        try:
+            model.gradient_checkpointing_enable(
+                gradient_checkpointing_kwargs={"use_reentrant": False}
+            )
+        except TypeError:
+            # Fallback para versiones que no soportan el parámetro
+            model.gradient_checkpointing_enable()
     if hasattr(model, "enable_input_require_grads"):
         model.enable_input_require_grads()
     
     # Configurar LoRA
-    if config['method'] == 'lora':
-        lora_phase = config.get('lora_phase', 'attention')
-        model = setup_lora(
-            model,
-            lora_r=config.get('lora_r', 8),
-            lora_alpha=config.get('lora_alpha', 16),
-            lora_dropout=config.get('lora_dropout', 0.05),
-            phase=lora_phase
-        )
-    elif config['method'] == 'qlora':
-        # QLoRA requiere bitsandbytes
-        raise NotImplementedError("QLoRA no implementado aún. Usa method: lora")
+    lora_phase = config.get('lora_phase', 'attention')
+    model = setup_lora(
+        model,
+        lora_r=config.get('lora_r', 8),
+        lora_alpha=config.get('lora_alpha', 16),
+        lora_dropout=config.get('lora_dropout', 0.05),
+        phase=lora_phase
+    )
 
-    # Preparar datasets
+    # Preparar datasets (sin tokenizar, SFTTrainer lo hace automáticamente)
     train_dataset, val_dataset = prepare_datasets(
         dataset_dir,
-        tokenizer,
-        max_seq_len,
         train_split=float(config.get('train_split', 0.9))
     )
-    
-    # Configurar data collator (padding dinámico + labels)
-    data_collator = build_causal_lm_collator(tokenizer)
     
     # Calcular estadísticas del entrenamiento
     num_train_samples = len(train_dataset)
@@ -499,38 +517,65 @@ def train(
     print(f"   Steps por época: ~{steps_per_epoch:,}")
     print(f"   Total de steps: ~{total_steps:,}")
     print(f"   Épocas: {num_epochs}")
-    device_desc = "CPU"
-    if current_device is not None:
-        device_desc = f"cuda:{current_device}"
-    print(f"   Learning rate: {learning_rate}")
-    print(f"   Dispositivo (índice local): {device_desc}")
+    # Verificación de memoria GPU
+    if torch.cuda.is_available():
+        print(f"\n💾 Información de Memoria GPU:")
+        for gpu_id in gpu_ids:
+            if gpu_id < torch.cuda.device_count():
+                props = torch.cuda.get_device_properties(gpu_id)
+                total_mem = props.total_memory / 1e9
+                print(f"   GPU {gpu_id}: {total_mem:.1f} GB total")
+        torch.cuda.empty_cache()
+        print(f"   ✅ Cache de GPU limpiado")
     
-    # Configurar entrenamiento
-    training_args = TrainingArguments(
+    # Mostrar información de GPUs
+    num_gpus = torch.cuda.device_count()
+    print(f"   GPUs disponibles: {num_gpus}")
+    print(f"   Learning rate: {learning_rate}")
+    
+    # Calcular warmup_ratio si no está especificado
+    warmup_steps = int(config.get('warmup_steps', 100))
+    warmup_ratio = config.get('warmup_ratio', None)
+    if warmup_ratio is None:
+        # Calcular warmup_ratio basado en warmup_steps
+        warmup_ratio = warmup_steps / total_steps if total_steps > 0 else 0.03
+    
+    # Configurar entrenamiento con SFTConfig (optimizado para QLoRA)
+    sft_config = SFTConfig(
         output_dir=str(output_dir),
         num_train_epochs=num_epochs,
         per_device_train_batch_size=batch_size,
         per_device_eval_batch_size=batch_size,
-        auto_find_batch_size=True, # Si el batch size que usas puede ocasionar un OOM (Out of Memory) lo dividimos en 2 hasta que funcione.
+        auto_find_batch_size=True,  # Si el batch size causa OOM, lo divide automáticamente
         learning_rate=learning_rate,
-        warmup_steps=int(config.get('warmup_steps', 100)),
-        logging_steps=50,  # Log cada 50 steps (verás progreso frecuente)
+        warmup_steps=warmup_steps,
+        warmup_ratio=warmup_ratio,  # Más flexible que solo warmup_steps
+        lr_scheduler_type=config.get('lr_scheduler_type', 'cosine'),  # Scheduler más sofisticado
+        logging_steps=50,  # Log cada 50 steps
         eval_steps=500,    # Evaluar cada 500 steps
         save_steps=500,    # Guardar checkpoint cada 500 steps
-        eval_strategy="steps",  # Estrategia de evaluación
+        eval_strategy="steps",  # Estrategia de evaluación (correcto para SFTConfig)
         save_total_limit=3,
         load_best_model_at_end=True,
         metric_for_best_model="eval_loss",
         greater_is_better=False,
-        fp16=torch.cuda.is_available(),
-        bf16=False,
+        optim="paged_adamw_32bit",  # ✅ Optimizador recomendado para QLoRA
+        bf16=True,  # Usar bfloat16 para QLoRA
+        fp16=False,
         gradient_accumulation_steps=gradient_accumulation_steps,
-        report_to="tensorboard",  # Cambiar a "wandb" o "tensorboard" si quieres
-        run_name="cybersecurity_domain_adaptation",
+        report_to="tensorboard",
+        run_name="cybersecurity_domain_adaptation_qlora",
+        max_length=max_seq_len,  # ✅ max_length (no max_seq_length) para SFTConfig
+        dataset_text_field="text",  # Campo del dataset que contiene el texto
+        packing=False,  # No empaquetar secuencias (continuation pretraining)
         remove_unused_columns=False,
         dataloader_pin_memory=False,  # Evitar problemas de memoria
-        logging_first_step=True,  # Mostrar primer step
-        logging_dir=str(output_dir / "logs"),  # Guardar logs en directorio
+        logging_first_step=True,
+        logging_dir=str(output_dir / "logs"),
+        # Logging más informativo
+        logging_nan_inf_filter=True,  # Detecta NaNs temprano
+        log_level="info",
+        disable_tqdm=False,  # Mostrar barra de progreso
     )
     
     # Parchear la verificación de torch.load ANTES de crear el trainer
@@ -544,7 +589,6 @@ def train(
         
         # Reemplazar COMPLETAMENTE los métodos del Trainer para evitar check_torch_load_is_safe
         import transformers.trainer as trainer_module
-        # os ya está importado al principio del archivo
         
         # Reemplazar _load_optimizer_and_scheduler completamente
         def patched_load_optimizer_and_scheduler(self, checkpoint):
@@ -594,52 +638,77 @@ def train(
         
         print("✅ Métodos del Trainer reemplazados para cargar checkpoints sin verificación")
     
-    # Crear trainer
-    trainer = Trainer(
+    # Crear SFTTrainer
+    trainer = SFTTrainer(
         model=model,
-        args=training_args,
+        processing_class=tokenizer,
+        args=sft_config,
         train_dataset=train_dataset,
         eval_dataset=val_dataset,
-        data_collator=data_collator,
     )
     
     # Entrenar
-    print(f"\n🚀 Iniciando entrenamiento...")
+    print(f"\n🚀 Iniciando entrenamiento con QLoRA...")
     print(f"   Output dir: {output_dir}")
     
     if resume_from_checkpoint:
         print(f"   Resumiendo desde: {resume_from_checkpoint}")
     
-    trainer.train(resume_from_checkpoint=resume_from_checkpoint)
+    # Manejo de interrupciones
+    try:
+        trainer.train(resume_from_checkpoint=resume_from_checkpoint)
+    except KeyboardInterrupt:
+        print("\n⚠️  Entrenamiento interrumpido por el usuario. Guardando checkpoint...")
+        interrupted_checkpoint_dir = output_dir / "interrupted_checkpoint"
+        trainer.save_model(str(interrupted_checkpoint_dir))
+        tokenizer.save_pretrained(interrupted_checkpoint_dir)
+        print(f"   Checkpoint guardado en: {interrupted_checkpoint_dir}")
+        print(f"   Puedes continuar con: --resume {interrupted_checkpoint_dir}")
+        raise
+    
+    # Validación post-entrenamiento
+    print(f"\n📈 Evaluando modelo final...")
+    try:
+        final_metrics = trainer.evaluate()
+        print(f"\n📊 Métricas finales:")
+        for key, value in final_metrics.items():
+            if isinstance(value, (int, float)):
+                print(f"   {key}: {value:.4f}")
+            else:
+                print(f"   {key}: {value}")
+    except Exception as e:
+        print(f"⚠️  No se pudieron calcular métricas finales: {e}")
     
     # Guardar modelo final
     print(f"\n💾 Guardando modelo final...")
-    
-    # El trainer ya cargó el mejor modelo si load_best_model_at_end=True
-    # Guardar el modelo final (adaptadores LoRA + tokenizer)
-    trainer.save_model(output_dir)
+    trainer.save_model()
     tokenizer.save_pretrained(output_dir)
     
-    # También guardar el estado del entrenamiento
-    print(f"   ✅ Adaptadores LoRA guardados en: {output_dir}")
-    print(f"   ✅ Tokenizer guardado en: {output_dir}")
-    
-    # Mostrar información del modelo guardado
-    adapter_config_path = output_dir / "adapter_config.json"
-    if adapter_config_path.exists():
-        print(f"   ✅ Configuración de adaptadores guardada")
+    # Guardar configuración de entrenamiento
+    config_save_path = output_dir / "training_config.json"
+    try:
+        # Preparar configuración para guardar (convertir Paths a strings)
+        config_to_save = {}
+        for key, value in config.items():
+            if isinstance(value, Path):
+                config_to_save[key] = str(value)
+            else:
+                config_to_save[key] = value
+        
+        with open(config_save_path, "w") as f:
+            json.dump(config_to_save, f, indent=2, default=str)
+        print(f"   ✅ Configuración guardada en: {config_save_path}")
+    except Exception as e:
+        print(f"⚠️  No se pudo guardar configuración: {e}")
     
     print(f"\n✅ Entrenamiento completado!")
-    print(f"   📁 Modelo final guardado en: {output_dir}")
-    print(f"   💡 Para usar el modelo, carga el modelo base y los adaptadores:")
-    print(f"      from peft import PeftModel")
-    print(f"      model = PeftModel.from_pretrained(base_model, '{output_dir}')")
+    print(f"   Modelo guardado en: {output_dir}")
     
     return trainer
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Entrena modelo con LoRA para Domain Adaptation"
+        description="Entrena modelo con QLoRA para Domain Adaptation"
     )
     
     parser.add_argument(
@@ -659,8 +728,8 @@ def main():
     parser.add_argument(
         '--output',
         type=Path,
-        default=Path('models/cybersecurity-adapted'),
-        help='Directorio de salida para el modelo'
+        default=Path('models/cybersecurity-qlora'),
+        help='Directorio de salida para el modelo (separado de train_lora.py)'
     )
     
     parser.add_argument(
@@ -684,7 +753,7 @@ def main():
     
     # Entrenar
     try:
-        trainer = train(
+        trainer = train_qlora(
             config_path=args.config,
             output_dir=args.output,
             dataset_dir=args.dataset,
