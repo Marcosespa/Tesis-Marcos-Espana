@@ -541,8 +541,8 @@ def main():
     parser.add_argument(
         '--max-questions',
         type=int,
-        default=10,
-        help='Número máximo de preguntas a evaluar (default: 10)'
+        default=100,
+        help='Número máximo de preguntas a evaluar (default: 100)'
     )
     
     parser.add_argument(
@@ -562,8 +562,8 @@ def main():
     parser.add_argument(
         '--gpu-id',
         type=int,
-        default=0,
-        help='ID de GPU a usar (default: 0)'
+        default=3,
+        help='ID de GPU a usar (default: 3)'
     )
     
     parser.add_argument(
