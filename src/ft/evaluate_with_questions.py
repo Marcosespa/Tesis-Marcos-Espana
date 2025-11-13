@@ -15,7 +15,7 @@ import argparse
 from datetime import datetime
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
-from peft import PeftModel
+from peft import PeftModel, PeftConfig
 
 class FineTunedModelEvaluator:
     """Evaluador para modelo fine-tuneado usando TopQuestions dataset"""
@@ -50,38 +50,75 @@ class FineTunedModelEvaluator:
         self.model, self.tokenizer = self.load_model()
         
     def load_model(self):
-        """Carga modelo fine-tuneado"""
+        """Carga modelo fine-tuneado con adaptadores LoRA"""
         print(f"📥 Cargando modelo base: {self.base_model}")
         
         # Verificar GPU
         if torch.cuda.is_available():
             print(f"   🚀 GPU disponible: cuda:{self.gpu_id}")
-            device = f"cuda:{self.gpu_id}"
+            device_map = {"": f"cuda:{self.gpu_id}"}
             dtype = torch.float16
         else:
             print(f"   ⚠️  GPU no disponible, usando CPU (será lento)")
-            device = None
+            device_map = None
             dtype = torch.float32
         
-        # Cargar modelo base
-        base_model = AutoModelForCausalLM.from_pretrained(
-            self.base_model,
-            torch_dtype=dtype,
-            device_map=device,
-            trust_remote_code=True
-        )
+        # Verificar si el modelo path es LoRA
+        model_path_obj = Path(self.model_path)
+        adapter_config_path = model_path_obj / "adapter_config.json" if model_path_obj.is_dir() else None
         
-        print(f"📥 Cargando adaptadores LoRA: {self.model_path}")
+        if adapter_config_path and adapter_config_path.exists():
+            print(f"✅ Detectado modelo LoRA en: {self.model_path}")
+            
+            # Leer configuración de LoRA
+            try:
+                peft_config = PeftConfig.from_pretrained(str(self.model_path))
+                print(f"   📋 Configuración LoRA:")
+                print(f"      - Base model: {peft_config.base_model_name_or_path}")
+                print(f"      - Task type: {peft_config.task_type}")
+                print(f"      - LoRA alpha: {peft_config.lora_alpha}")
+                print(f"      - LoRA r: {peft_config.r}")
+                print(f"      - Target modules: {peft_config.target_modules}")
+            except Exception as e:
+                print(f"   ⚠️  No se pudo leer configuración LoRA: {e}")
+            
+            # Cargar modelo base
+            base_model = AutoModelForCausalLM.from_pretrained(
+                self.base_model,
+                torch_dtype=dtype,
+                device_map=device_map,
+                trust_remote_code=True
+            )
+            
+            print(f"📥 Cargando adaptadores LoRA desde: {self.model_path}")
+            
+            # Cargar adaptadores LoRA
+            model = PeftModel.from_pretrained(base_model, str(self.model_path))
+            
+            print(f"✅ Adaptadores LoRA cargados correctamente")
+            
+        else:
+            # Si no es LoRA, intentar cargar como modelo completo
+            print(f"⚠️  No se detectó adapter_config.json, intentando cargar como modelo completo")
+            model = AutoModelForCausalLM.from_pretrained(
+                str(self.model_path),
+                torch_dtype=dtype,
+                device_map=device_map,
+                trust_remote_code=True
+            )
+            print(f"✅ Modelo completo cargado (NO es LoRA)")
         
-        # Cargar adaptadores LoRA
-        model = PeftModel.from_pretrained(base_model, self.model_path)
+        # Cargar tokenizer (intentar desde modelo primero, luego desde base)
+        try:
+            tokenizer = AutoTokenizer.from_pretrained(str(self.model_path))
+        except:
+            tokenizer = AutoTokenizer.from_pretrained(self.base_model)
         
-        # Cargar tokenizer
-        tokenizer = AutoTokenizer.from_pretrained(self.base_model)
         if tokenizer.pad_token is None:
             tokenizer.pad_token = tokenizer.eos_token
         
         print(f"✅ Modelo cargado en dispositivo: {model.device}")
+        print(f"✅ Tokenizer cargado")
         
         return model, tokenizer
     
@@ -90,12 +127,24 @@ class FineTunedModelEvaluator:
         print(f"📖 Cargando preguntas del dataset TopQuestions (máximo {max_questions})...")
         
         try:
-            # Buscar archivo CSV
-            csv_file = Path("/Users/marcosespana/Desktop/U/DatosTesis/data/Questions/TopQuestions(in).csv")
-            if not csv_file.exists():
-                csv_file = Path("data/Questions/TopQuestions(in).csv")
-                if not csv_file.exists():
-                    raise FileNotFoundError("No se encontró TopQuestions(in).csv")
+            # Buscar archivo CSV (buscar en múltiples ubicaciones posibles)
+            possible_paths = [
+                Path("data/Questions/TopQuestions(in).csv"),  # Ruta relativa desde raíz del proyecto
+                Path(__file__).parent.parent.parent / "data" / "Questions" / "TopQuestions(in).csv",  # Ruta relativa desde este script
+                Path("/Users/marcosespana/Desktop/U/DatosTesis/data/Questions/TopQuestions(in).csv"),  # Ruta macOS (por compatibilidad)
+            ]
+            
+            csv_file = None
+            for path in possible_paths:
+                if path.exists():
+                    csv_file = path
+                    break
+            
+            if csv_file is None:
+                raise FileNotFoundError(
+                    f"No se encontró TopQuestions(in).csv en ninguna de las ubicaciones:\n" +
+                    "\n".join(f"  - {p}" for p in possible_paths)
+                )
             
             # Leer CSV
             df = pd.read_csv(csv_file, sep=';')
@@ -138,7 +187,20 @@ class FineTunedModelEvaluator:
     
     def generate_answer(self, question: str) -> str:
         """Genera respuesta usando el modelo fine-tuneado"""
-        inputs = self.tokenizer(question, return_tensors="pt").to(self.model.device)
+        # Intentar usar chat template si está disponible (para modelos instruct)
+        if hasattr(self.tokenizer, 'apply_chat_template') and self.tokenizer.chat_template is not None:
+            # Formatear como mensaje de chat
+            messages = [{"role": "user", "content": question}]
+            formatted_prompt = self.tokenizer.apply_chat_template(
+                messages,
+                tokenize=False,
+                add_generation_prompt=True
+            )
+        else:
+            # Usar pregunta directamente si no hay chat template
+            formatted_prompt = question
+        
+        inputs = self.tokenizer(formatted_prompt, return_tensors="pt").to(self.model.device)
         
         with torch.no_grad():
             outputs = self.model.generate(
@@ -154,7 +216,10 @@ class FineTunedModelEvaluator:
         generated = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
         
         # Remover el prompt de la respuesta
-        if generated.startswith(question):
+        if generated.startswith(formatted_prompt):
+            generated = generated[len(formatted_prompt):].strip()
+        elif generated.startswith(question):
+            # Fallback: remover pregunta original si no coincide con formatted_prompt
             generated = generated[len(question):].strip()
         
         return generated
@@ -257,6 +322,15 @@ class FineTunedModelEvaluator:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             model_name = Path(self.model_path).name.replace('/', '_')
             filename = f"ft_evaluation_{model_name}_{timestamp}.xlsx"
+        
+        # Crear directorio de resultados si no existe
+        results_dir = Path("results/excel/ft_evaluations")
+        results_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Si filename no es una ruta absoluta, guardarlo en results_dir
+        filename_path = Path(filename)
+        if not filename_path.is_absolute():
+            filename = str(results_dir / filename)
         
         print(f"💾 Guardando resultados en: {filename}")
         
