@@ -8,6 +8,7 @@ import os
 import sys
 import json
 import time
+import re
 import pandas as pd
 from pathlib import Path
 from typing import List, Dict, Any
@@ -160,8 +161,8 @@ class FineTunedModelEvaluator:
                 cuerpo = str(row.get('Cuerpo', '')).strip() if pd.notna(row.get('Cuerpo')) else ''
                 
                 if titulo and cuerpo:
-                    # Combinar título + cuerpo como pregunta completa
-                    question_text = f"{titulo}\n\n{cuerpo}"
+                    # Combinar título + cuerpo como pregunta completa (asegurar formato correcto)
+                    question_text = f"{titulo}\n\n{cuerpo}".strip()
                     
                     # Respuesta esperada
                     expected_answer = str(row.get('Respuesta', '')).strip() if pd.notna(row.get('Respuesta')) else ''
@@ -187,18 +188,37 @@ class FineTunedModelEvaluator:
     
     def generate_answer(self, question: str) -> str:
         """Genera respuesta usando el modelo fine-tuneado"""
+        # Construir prompt con instrucciones detalladas
+        instruction_prompt = (
+            "IMPORTANT: Respuesta directa, concisa, lenguaje neutral profesional. "
+            "Sin verbosidad ni adjetivación excesiva. Responde SOLO la pregunta.\n\n"
+            f"Original Query: '{question}'\n\n"
+            "MANDATORY Requirements for the final answer:\n"
+            "- Answer DIRECTLY and CONCISELY - avoid verbosity\n"
+            "- Professional, neutral language - NO excessive adjectives\n"
+            "- Respond ONLY the question - no extra information\n"
+            "- Answer in English, clearly and concisely\n"
+            "- Minimum 100 words\n"
+            "- Do NOT include citations or source references\n"
+            "- Ground ALL claims in the retrieved documents but don't cite them\n"
+            "- If there are practical steps, use numbered lists\n"
+            "- If evidence is insufficient, be explicit about limitations\n"
+            "- Write naturally without academic citations\n\n"
+            "IMPORTANT: This is the FINAL answer. Make it direct, concise, and well-grounded."
+        )
+        
         # Intentar usar chat template si está disponible (para modelos instruct)
         if hasattr(self.tokenizer, 'apply_chat_template') and self.tokenizer.chat_template is not None:
-            # Formatear como mensaje de chat
-            messages = [{"role": "user", "content": question}]
+            # Formatear como mensaje de chat con las instrucciones
+            messages = [{"role": "user", "content": instruction_prompt}]
             formatted_prompt = self.tokenizer.apply_chat_template(
                 messages,
                 tokenize=False,
                 add_generation_prompt=True
             )
         else:
-            # Usar pregunta directamente si no hay chat template
-            formatted_prompt = question
+            # Usar prompt con instrucciones directamente si no hay chat template
+            formatted_prompt = instruction_prompt
         
         inputs = self.tokenizer(formatted_prompt, return_tensors="pt").to(self.model.device)
         
@@ -215,14 +235,109 @@ class FineTunedModelEvaluator:
         
         generated = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
         
-        # Remover el prompt de la respuesta
-        if generated.startswith(formatted_prompt):
-            generated = generated[len(formatted_prompt):].strip()
-        elif generated.startswith(question):
-            # Fallback: remover pregunta original si no coincide con formatted_prompt
-            generated = generated[len(question):].strip()
+        # Limpiar la respuesta: remover prompt y cualquier texto basura
+        cleaned_response = self._clean_response(generated, formatted_prompt, question)
         
-        return generated
+        return cleaned_response
+    
+    def _clean_response(self, generated_text: str, prompt: str, original_question: str) -> str:
+        """
+        Limpia la respuesta del modelo removiendo el prompt y cualquier texto basura
+        
+        Args:
+            generated_text: Texto completo generado por el modelo
+            prompt: Prompt completo que se envió al modelo
+            original_question: Pregunta original (título + cuerpo)
+        
+        Returns:
+            Respuesta limpia sin prompt ni texto basura
+        """
+        # Remover el prompt completo si está al inicio
+        if generated_text.startswith(prompt):
+            response = generated_text[len(prompt):].strip()
+        # Fallback: remover pregunta original si está al inicio
+        elif generated_text.startswith(original_question):
+            response = generated_text[len(original_question):].strip()
+        else:
+            # Si no encontramos el prompt al inicio, buscar patrones comunes
+            response = generated_text
+            
+            # Remover patrones comunes de chat templates
+            # Para Qwen: buscar después de "<|im_start|>assistant\n" o similar
+            assistant_markers = [
+                "<|im_start|>assistant\n",
+                "<|im_start|>assistant",
+                "assistant\n",
+                "Assistant:",
+                "assistant:",
+            ]
+            
+            for marker in assistant_markers:
+                if marker in response:
+                    parts = response.split(marker, 1)
+                    if len(parts) > 1:
+                        response = parts[1].strip()
+                        break
+        
+        # Remover cualquier repetición de instrucciones o texto basura
+        # Patrones a remover
+        patterns_to_remove = [
+            "IMPORTANT:",
+            "MANDATORY Requirements",
+            "Original Query:",
+            "This is the FINAL answer",
+            "Make it direct, concise",
+            "Answer DIRECTLY",
+            "Professional, neutral language",
+        ]
+        
+        # Dividir en líneas y filtrar líneas que contengan patrones no deseados
+        lines = response.split('\n')
+        cleaned_lines = []
+        
+        for line in lines:
+            line = line.strip()
+            # Saltar líneas vacías al inicio
+            if not line and not cleaned_lines:
+                continue
+            
+            # Saltar líneas que son claramente parte de las instrucciones
+            is_instruction = False
+            for pattern in patterns_to_remove:
+                if pattern.lower() in line.lower():
+                    is_instruction = True
+                    break
+            
+            if not is_instruction:
+                cleaned_lines.append(line)
+        
+        # Unir líneas y limpiar espacios múltiples
+        cleaned_response = '\n'.join(cleaned_lines).strip()
+        
+        # Remover espacios múltiples (pero mantener saltos de línea para listas)
+        # Solo colapsar espacios dentro de líneas, no entre párrafos
+        lines = cleaned_response.split('\n')
+        cleaned_lines = []
+        for line in lines:
+            # Colapsar múltiples espacios en una línea, pero mantener la línea
+            cleaned_line = re.sub(r' +', ' ', line.strip())
+            if cleaned_line:  # Solo agregar líneas no vacías
+                cleaned_lines.append(cleaned_line)
+        
+        cleaned_response = '\n'.join(cleaned_lines)
+        
+        # Remover múltiples saltos de línea consecutivos (máximo 2)
+        cleaned_response = re.sub(r'\n{3,}', '\n\n', cleaned_response)
+        
+        # Si la respuesta está vacía o es muy corta, devolver el texto original procesado
+        if len(cleaned_response) < 10:
+            # Último intento: buscar después de la pregunta original
+            if original_question in response:
+                parts = response.split(original_question, 1)
+                if len(parts) > 1:
+                    cleaned_response = parts[1].strip()
+        
+        return cleaned_response.strip()
     
     def evaluate_question(self, question_data: Dict[str, str]) -> Dict[str, Any]:
         """Evalúa una pregunta con el modelo fine-tuneado"""
