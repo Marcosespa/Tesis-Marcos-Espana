@@ -9,6 +9,8 @@ ScriptsExtractData/oapen_pdfs_clasificados.csv
 ScriptsExtractData/download_progress.json
 *.xlsx
 *.xls
+# Permitir archivos Excel de evaluaciones en results/excel/ft_evaluations/
+!results/excel/ft_evaluations/*.xlsx
 *.csv
 *.jsons
 *.jsonl
