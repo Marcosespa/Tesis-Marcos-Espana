@@ -150,7 +150,11 @@ DatosTesis/
 #### `src/rag/ingest/extract_pdf.py`
 - **Propósito**: Extracción y limpieza de documentos PDF
 - **Funciones**:
-  - Extrae texto de PDFs con OCR si es necesario
+  - Extrae texto de PDFs con PyMuPDF como método principal
+  - Recurre a **Tesseract OCR** (vía `pytesseract`) como fallback cuando PyMuPDF obtiene menos de 20 caracteres por página (umbral configurable con `--min-chars`)
+  - Las páginas procesadas con OCR se marcan con el flag `ocr_or_low_text` para seguimiento de calidad
+  - Soporta múltiples idiomas de OCR mediante el parámetro `--ocr-lang` (por defecto `eng`, también `spa` para español)
+  - Renderiza páginas a PNG a 300 DPI antes de aplicar OCR para mayor precisión
   - Normaliza texto (guiones, espacios, caracteres de control)
   - Detecta y elimina headers/footers repetidos
   - Extrae abstracts y metadatos
@@ -334,7 +338,8 @@ bash scripts/rag/30_index.sh
 
 ### Procesamiento de Datos
 - **Python 3.12**: Lenguaje principal
-- **PyMuPDF**: Extracción de texto de PDFs
+- **PyMuPDF**: Extracción de texto de PDFs (método principal)
+- **Tesseract OCR** (vía `pytesseract`): Motor OCR de código abierto usado como fallback para páginas con poco o ningún texto extraíble directamente del PDF
 - **BeautifulSoup**: Procesamiento de HTML
 - **Readability**: Extracción de contenido principal
 - **chardet**: Detección automática de codificación
@@ -387,6 +392,42 @@ bash scripts/rag/30_index.sh
 - **Consolidación de datos**: Archivos agrupados por categorías funcionales
 - **Organización jerárquica**: Estructura clara y escalable
 - **Eficiencia de procesamiento**: Archivos consolidados más fáciles de manejar
+
+## 🔍 Motor OCR Utilizado
+
+La extracción de texto de PDFs sigue una estrategia de **dos capas**:
+
+1. **Capa principal — PyMuPDF (`fitz`)**: Extrae el texto incrustado en el PDF de forma directa y eficiente.
+2. **Capa de respaldo — Tesseract OCR** (a través del wrapper Python `pytesseract`): Se activa automáticamente cuando PyMuPDF obtiene menos de 20 caracteres en una página (umbral ajustable con `--min-chars`). Tesseract es el motor de reconocimiento óptico de caracteres (OCR) de código abierto desarrollado originalmente por HP y mantenido actualmente por Google.
+
+### Parámetros de OCR configurables
+
+| Parámetro | Descripción | Valor por defecto |
+|-----------|-------------|-------------------|
+| `--ocr-lang` | Idioma para Tesseract (código ISO 639-3, p. ej. `eng`, `spa`) | `eng` |
+| `--min-chars` | Umbral mínimo de caracteres para activar el fallback OCR | `20` |
+
+### Flujo de procesamiento OCR
+
+```
+Página PDF
+    │
+    ▼
+PyMuPDF extrae texto ──► ¿Texto > min-chars? ──► Sí ──► Usar texto de PyMuPDF
+                                │
+                               No
+                                │
+                                ▼
+                    Renderizar página a PNG (300 DPI)
+                                │
+                                ▼
+                    Tesseract OCR (pytesseract)
+                                │
+                                ▼
+                    Marcar página con flag "ocr_or_low_text"
+```
+
+> **Nota**: `pytesseract` se importa de forma opcional; si Tesseract no está instalado en el sistema, el proceso continúa sin OCR.
 
 ## 🔧 Instalación y Configuración
 
