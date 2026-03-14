@@ -429,6 +429,101 @@ PyMuPDF extrae texto ──► ¿Texto > min-chars? ──► Sí ──► Usar
 
 > **Nota**: `pytesseract` se importa de forma opcional; si Tesseract no está instalado en el sistema, el proceso continúa sin OCR.
 
+## 🏷️ Extracción Heurística de Metadatos
+
+Sí, los atributos como el **título** y el **autor** se extraen de forma heurística, con cadenas de fallback para maximizar la cobertura. A continuación se explica cómo funciona cada heurística.
+
+---
+
+### Extracción de Título
+
+#### En PDFs (`extract_pdf.py`)
+
+| Paso | Estrategia | Detalle |
+|------|-----------|---------|
+| 1 | **Metadatos nativos del PDF** | Se lee el campo `title` del encabezado interno del archivo PDF mediante `doc.metadata.get("title")`. |
+| 2 | **Fallback: nombre del archivo** | Si el campo `title` está vacío, se usa el nombre del archivo sin extensión (`pdf_path.stem`). |
+
+Adicionalmente, `pdf_catalog.py` aplica una **refinación posterior**:
+
+- Si el título extraído tiene menos de 10 caracteres, el sistema escanea las primeras 3 páginas del documento buscando la primera línea que cumpla todos estos criterios:
+  - Entre 20 y 200 caracteres de longitud.
+  - No escrita completamente en mayúsculas.
+  - No empieza por `Page`, `Chapter` o `Section`.
+- Si ninguna línea cumple todos los criterios, se conserva el título original (aunque sea corto).
+
+#### En archivos de texto (`extract_text.py`)
+
+| Paso | Estrategia | Detalle |
+|------|-----------|---------|
+| 1 | **Primera línea válida** | Se recorren las primeras 10 líneas buscando la primera que tenga entre 10 y 200 caracteres y no empiece con `http`, `www`, `#`, `*` ni `-`. |
+| 2 | **Fallback: nombre del archivo** | Si ninguna línea supera el filtro, se usa el nombre del archivo sin extensión (`file_path.stem`). |
+
+---
+
+### Extracción de Autor
+
+#### En PDFs (`extract_pdf.py`)
+
+| Paso | Estrategia | Detalle |
+|------|-----------|---------|
+| 1 | **Metadatos nativos del PDF** | Se lee el campo `author` del encabezado interno del PDF. |
+| 2 | **División por punto y coma** | El valor se divide por `;` para manejar múltiples autores: `"Autor A; Autor B"` → `["Autor A", "Autor B"]`. |
+| 3 | **Fallback** | Si el campo está vacío, se devuelve una lista vacía `[]`. |
+
+#### En archivos de texto (`extract_text.py`)
+
+Se busca mediante dos patrones regex en las primeras 20 líneas del documento:
+
+| Patrón | Ejemplo de entrada | Resultado |
+|--------|--------------------|-----------|
+| `(?:Author\|By\|Written by)[:\s]+(.+)` | `Author: Jane Doe` | `Jane Doe` |
+| `(?:Author\|By\|Written by)[:\s]+(.+)` | `By John Smith` | `John Smith` |
+| `^(.+?)(?:\s*-\s*\|\s*,\s*)(?:Author\|Writer)` | `Jane Doe - Author` | `Jane Doe` |
+
+Si hay coincidencia, los autores se dividen por `,`, `&` o `;` y se filtra cualquier resultado de más de 100 caracteres (para evitar falsos positivos). El resultado se limita a un máximo de 3 autores. Si ningún patrón coincide, se devuelve una lista vacía.
+
+---
+
+### Extracción de Abstract
+
+Ambos pipelines (PDF y texto) buscan el abstract usando las siguientes expresiones regulares, en orden:
+
+```
+1. Abstract\s*[:\-]?\s*(.+?)(?:\n\n|\n[A-Z]|$)   →  inglés (capitalizado)
+2. ABSTRACT\s*[:\-]?\s*(.+?)(?:\n\n|\n[A-Z]|$)   →  inglés (mayúsculas)
+3. Resumen\s*[:\-]?\s*(.+?)(?:\n\n|\n[A-Z]|$)    →  español (capitalizado)
+4. RESUMEN\s*[:\-]?\s*(.+?)(?:\n\n|\n[A-Z]|$)    →  español (mayúsculas)
+5. Summary\s*[:\-]?\s*(.+?)(?:\n\n|\n[A-Z]|$)    →  (solo en texto plano)
+```
+
+Los patrones capturan el texto que sigue hasta la primera línea en blanco o hasta el inicio de una nueva sección (línea en mayúscula). Si ningún patrón coincide, se usan los primeros 200 caracteres del texto como abstract. El resultado se trunca a 500 caracteres.
+
+---
+
+### Detección Heurística de Headers y Footers
+
+Para eliminar encabezados y pies de página repetidos, se aplica la siguiente heurística:
+
+| Criterio | PDFs | Archivos de texto |
+|---------|------|-------------------|
+| Frecuencia mínima | > 50 % de páginas | > 30 % de fragmentos |
+| Longitud máxima | ≤ 80 caracteres | ≤ 100 caracteres |
+
+La lógica es: si la primera o última línea de muchas páginas es idéntica y corta, es muy probable que sea un header o footer, y se elimina del texto.
+
+---
+
+### Tabla resumen de estrategias
+
+| Campo | PDFs | Archivos de texto | Fallback |
+|-------|------|------------------|---------|
+| **Título** | Metadato `title` del PDF → refinación por contenido | Primera línea válida (10-200 chars) | Nombre del archivo |
+| **Autores** | Metadato `author` del PDF (dividido por `;`) | Regex en primeras 20 líneas, máx. 3 | Lista vacía |
+| **Abstract** | 4 patrones regex en primera página | 5 patrones regex | Primeros 200 chars del texto |
+| **Headers/Footers** | Repetición > 50 %, ≤ 80 chars | Repetición > 30 %, ≤ 100 chars | — |
+| **Extracción de texto** | PyMuPDF → words fallback → OCR | Detección automática de codificación | UTF-8 con errores ignorados |
+
 ## 🔧 Instalación y Configuración
 
 ### Requisitos
